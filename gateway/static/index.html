@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-src 'self'; form-action 'self'; base-uri 'none'">
+    <meta name="referrer" content="no-referrer">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Set up payments</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<main>
+    <header>
+        <h1>Accept crypto payments</h1>
+        <p class="lede">No email, no personal details, no custody. Payments go straight to your own wallet.</p>
+    </header>
+
+    <section id="choose">
+        <h2>Set up your account</h2>
+        <div class="options">
+            <button type="button" class="option" data-mode="create">
+                <strong>Create a new wallet</strong>
+                <span>We generate a 12-word recovery phrase on this device. Best if you're starting fresh.</span>
+            </button>
+            <button type="button" class="option" data-mode="import">
+                <strong>I have a recovery phrase</strong>
+                <span>Use an existing wallet, such as Trust Wallet or MetaMask.</span>
+            </button>
+            <a class="option" href="xpub.html">
+                <strong>Use xpub keys</strong>
+                <span>Paste extended public keys from a hardware wallet, Electrum or Sparrow. No phrase needed.</span>
+            </a>
+        </div>
+        <p class="note">Your recovery phrase is handled in an isolated frame that cannot connect to the internet. Only public keys (xpubs), which can receive but never spend, are sent to our server.</p>
+    </section>
+
+    <section id="wallet" hidden>
+        <button type="button" id="back" class="link">&larr; Back</button>
+        <p id="frame-status" class="note" role="status">Loading the secure phrase window…</p>
+        <iframe id="frame" sandbox="allow-scripts" title="Recovery phrase, isolated and offline"></iframe>
+    </section>
+
+    <p class="error" id="error" role="alert" hidden></p>
+
+    <section id="result" hidden>
+        <h2>Your account is ready</h2>
+        <label for="api-key">API key</label>
+        <div class="copy-row">
+            <input id="api-key" readonly>
+            <button type="button" id="copy-key">Copy</button>
+        </div>
+        <p class="warning">Save this key now. It's shown only once and it's your only login: we have no email to reset it.</p>
+        <h3>Check your addresses</h3>
+        <p>The first receive address for each coin should match the one your wallet shows for the same account.</p>
+        <dl id="addresses" class="addresses"></dl>
+    </section>
+</main>
+<script src="app.js"></script>
+</body>
+</html>

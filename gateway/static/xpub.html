@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; form-action 'self'; base-uri 'none'">
+    <meta name="referrer" content="no-referrer">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Use xpub keys</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<main>
+    <header>
+        <a href="./" class="link">&larr; Back</a>
+        <h1>Use xpub keys</h1>
+        <p class="lede">Paste the account xpub (BIP44, path <code>m/44'/coin'/account'</code>) for each coin you want to accept. Leave the rest empty.</p>
+    </header>
+
+    <form id="manual" novalidate>
+        <label for="x-BTC">Bitcoin (BTC)</label>
+        <input id="x-BTC" name="BTC" placeholder="xpub…" autocomplete="off" spellcheck="false" autocapitalize="off">
+        <p class="field-error" id="e-BTC" role="alert"></p>
+
+        <label for="x-LTC">Litecoin (LTC)</label>
+        <input id="x-LTC" name="LTC" placeholder="Ltub… or xpub…" autocomplete="off" spellcheck="false" autocapitalize="off">
+        <p class="field-error" id="e-LTC" role="alert"></p>
+
+        <label for="x-DOGE">Dogecoin (DOGE)</label>
+        <input id="x-DOGE" name="DOGE" placeholder="dgub… or xpub…" autocomplete="off" spellcheck="false" autocapitalize="off">
+        <p class="field-error" id="e-DOGE" role="alert"></p>
+
+        <label for="x-ETH">Ethereum and BNB Smart Chain (ETH, BSC)</label>
+        <input id="x-ETH" name="ETH" placeholder="xpub…" autocomplete="off" spellcheck="false" autocapitalize="off">
+        <p class="field-error" id="e-ETH" role="alert"></p>
+
+        <label for="x-TRX">Tron (TRX)</label>
+        <input id="x-TRX" name="TRX" placeholder="xpub…" autocomplete="off" spellcheck="false" autocapitalize="off">
+        <p class="field-error" id="e-TRX" role="alert"></p>
+
+        <button type="submit">Create account</button>
+    </form>
+
+    <p class="note">Never paste a private key (<code>xprv</code>) or a recovery phrase here. Don't have xpubs? Hardware wallets, Electrum and Sparrow can export them, or use the <a href="tools/payment-xpub-tool.html" download>offline xpub tool</a> (<a href="tools/payment-xpub-tool.html.sha256">SHA-256</a>) on a computer without internet.</p>
+
+    <p class="error" id="error" role="alert" hidden></p>
+
+    <section id="result" hidden>
+        <h2>Your account is ready</h2>
+        <label for="api-key">API key</label>
+        <div class="copy-row">
+            <input id="api-key" readonly>
+            <button type="button" id="copy-key">Copy</button>
+        </div>
+        <p class="warning">Save this key now. It's shown only once and it's your only login: we have no email to reset it.</p>
+        <h3>Check your addresses</h3>
+        <p>The first receive address for each coin should match the one your wallet shows for the same account.</p>
+        <dl id="addresses" class="addresses"></dl>
+    </section>
+</main>
+<script src="app.js"></script>
+</body>
+</html>

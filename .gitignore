@@ -1,0 +1,24 @@
+# --- Secrets: never commit -------------------------------------------------------
+# Old system: seed phrase + provider keys. Gateway: provider keys.
+.env
+.env.*
+!.env.example
+# Archives can contain copies of .env
+*.zip
+
+# --- Local data -----------------------------------------------------------------
+# SQLite databases: xpubs, API key hashes, webhook secrets, payments
+*.db
+*.db-wal
+*.db-shm
+logs/
+*.log
+
+# --- Generated / tool caches ----------------------------------------------------
+__pycache__/
+*.pyc
+.impeccable/
+# Local Claude Code / editor settings (machine-specific paths)
+.claude/
+.vscode/
+.idea/

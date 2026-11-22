@@ -1,0 +1,44 @@
+{
+  "BTC": {
+    "type": "UTXO",
+    "provider": "blockcypher",
+    "confirmations": 2,
+    "gas_token": null,
+    "explorer": "https://blockchair.com/bitcoin/transaction/"
+  },
+  "ETH": {
+    "type": "EVM",
+    "provider": "alchemy",
+    "gas_token": "ETH",
+    "confirmations": 10,
+    "explorer": "https://etherscan.io/tx/"
+  },
+  "BSC": {
+    "type": "EVM",
+    "provider": "ankr",
+    "gas_token": "BNB",
+    "confirmations": 5,
+    "explorer": "https://bscscan.com/tx/"
+  },
+  "LTC": {
+    "type": "UTXO",
+    "provider": "blockcypher",
+    "confirmations": 6,
+    "gas_token": null,
+    "explorer": "https://blockchair.com/litecoin/transaction/"
+  },
+  "DOGE": {
+    "type": "UTXO",
+    "provider": "blockcypher",
+    "confirmations": 6,
+    "gas_token": null,
+    "explorer": "https://blockchair.com/dogecoin/transaction/"
+  },
+  "TRX": {
+    "type": "TRON",
+    "provider": "trongrid",
+    "gas_token": "TRX",
+    "confirmations": 20,
+    "explorer": "https://tronscan.org/#/transaction/"
+  }
+}

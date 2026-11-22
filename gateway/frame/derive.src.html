@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <!-- SOURCE file. Build static/derive.html with `python build_frame.py`; never edit the output.
+         The recovery phrase only ever exists in this document. It runs in a sandboxed iframe
+         (opaque origin), loads no files, and its policy forbids every network request.
+         Only the inlined script/style blocks, pinned by SHA-256, may run. See docs/security.md. -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src {{SCRIPT_HASH}}; style-src {{STYLE_HASH}}; connect-src 'none'; form-action 'none'; base-uri 'none'">
+    <meta name="referrer" content="no-referrer">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Recovery phrase</title>
+    <style>{{STYLES}}</style>
+</head>
+<body class="frame">
+
+<section id="create" hidden>
+    <div id="c-show">
+        <h2>Your recovery phrase</h2>
+        <p>Write these 12 words on paper, in order. Anyone who has them can spend your funds. If you lose them, nobody can recover your funds, including us.</p>
+        <ol id="words" class="words"></ol>
+        <label class="check"><input type="checkbox" id="c-ack"> I wrote my recovery phrase down and stored it safely</label>
+        <button type="button" id="c-next" disabled>Continue</button>
+    </div>
+    <div id="c-confirm" hidden>
+        <h2>Confirm your phrase</h2>
+        <p>Type the words at these positions to check your backup.</p>
+        <div id="c-checks"></div>
+        <p class="error" id="c-error" role="alert"></p>
+        <div class="actions">
+            <button type="button" id="c-back" class="secondary">Show phrase again</button>
+            <button type="button" id="c-done">Create account</button>
+        </div>
+    </div>
+</section>
+
+<section id="import" hidden>
+    <h2>Enter your recovery phrase</h2>
+    <p>It stays on this device. Only public keys are sent to our server.</p>
+    <label for="i-phrase">Recovery phrase (12 to 24 words, English)</label>
+    <textarea id="i-phrase" rows="3" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"></textarea>
+    <details>
+        <summary>Advanced</summary>
+        <label for="i-pass">BIP39 passphrase (only if your wallet uses one)</label>
+        <input id="i-pass" type="password" autocomplete="off">
+        <label for="i-account">Account number</label>
+        <input id="i-account" type="number" min="0" value="1" inputmode="numeric">
+        <p class="hint">Account 1 keeps payments apart from your wallet's main account 0. Most mobile wallets only show account 0, so check payments in your dashboard.</p>
+    </details>
+    <p class="error" id="i-error" role="alert"></p>
+    <button type="button" id="i-done">Create account</button>
+</section>
+
+<section id="done" hidden>
+    <h2>Keys derived</h2>
+    <p>Your recovery phrase has been cleared from this page. Only the public keys were handed over.</p>
+</section>
+
+<script>{{SCRIPT}}</script>
+</body>
+</html>
