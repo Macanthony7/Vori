@@ -1,0 +1,8 @@
+# Files whose exact bytes are pinned by a SHA-256 (CSP hashes or published checksums).
+# Git must never convert their line endings, or the hashes stop matching and the page breaks.
+frontend/public/derive.html     -text
+frontend/public/tools/**        -text
+frontend/frame/**               -text
+xpub_tool/dist/**               -text
+*.sha256                        -text
+SHA256SUMS                      -text
