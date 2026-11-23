@@ -45,7 +45,9 @@ backend/
 | Payments: `POST /payments`, `GET /payments[/{id}]`, 30-min window, address reuse for the gap limit | Built and tested |
 | Watcher: detection with standard confirmations, native coins + USDT; cron mode with a single-instance lock | Built; logic tested with a fake chain, providers checked live (read-only) |
 | Signed webhooks with retries | Built and tested |
-| Free-tier limits, paid plans, rate limiting, API key recovery, transaction hashes | Planned, see [docs/roadmap.md](docs/roadmap.md) |
+| Checkout page `/pay/{id}` with QR, countdown and live status | Built; API tested, page checked in the preview browser (desktop + mobile) |
+| Wallet dashboard (balance, receive, send signed on device), transaction hashes, paid-late, rate limiting, API key recovery | Planned, see [docs/roadmap.md](docs/roadmap.md) |
+| Free-tier limits, paid plans | Later |
 
 ## Quick start (development)
 

@@ -9,6 +9,9 @@
 - `backend/requirements.txt` replaces the old root `requirements.txt`.
 
 ### Added
+- **Checkout page** at `/pay/{id}` for payers: amount, network, QR code, address and amount with Copy, countdown, a wrong-network warning and live status (waiting, partly paid, confirming, paid, expired). The address is hidden once paying is no longer useful. Public data endpoint `GET /pay/{id}/status` (no API key, no `reference`). Payments now include `checkout_url`, built from the new `GATEWAY_PUBLIC_URL` setting.
+- `backend/.env` is now loaded by every process (it was only read by the watcher's provider client).
+- Roadmap direction: **a non-custodial wallet that is also a payment gateway.** No background sweeper and no forwarder contracts: the merchant sends from their own device, and token gas is paid from their main address (EIP-7702 on Ethereum/BSC, energy delegation on Tron). See `docs/roadmap.md`.
 - Watcher cron mode, `--max-seconds N`, for hosts that kill long jobs (cPanel), plus a single-instance OS lock and graceful SIGTERM. Both were carried over from the prototype's poller.
 - `docs/roadmap.md`: planned work, transaction-hash lookup methods per chain, explorer URLs, BlockCypher push hooks, monitoring queries, and lessons from the prototype.
 - **Payments:** `POST /payments`, `GET /payments/{id}` and `GET /payments`, for BTC, LTC, DOGE, ETH, BNB, TRX and USDT on Ethereum, BSC and Tron. 30-minute payment window. Amounts are decimal strings.

@@ -1,0 +1,30 @@
+/* Checkout page only. Kept out of styles.css, which is hash-pinned inside the seed frame. */
+.pay { max-width: 460px; }
+.pay header { text-align: center; }
+.pay header p { margin: 0; }
+.amount { font-size: 2rem; font-weight: 700; line-height: 1.2; word-break: break-all; }
+.network { color: var(--muted); }
+
+.status {
+    margin: 20px 0;
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    text-align: center;
+    font-weight: 600;
+}
+.status[data-tone=good] { border-color: #2e7d32; color: #2e7d32; }
+.status[data-tone=bad] { border-color: var(--danger); color: var(--danger); }
+@media (prefers-color-scheme: dark) {
+    .status[data-tone=good] { border-color: #81c784; color: #81c784; }
+}
+
+/* QR stays black on white in dark mode: some scanners fail on inverted codes. */
+.qr { display: flex; justify-content: center; }
+.qr canvas { box-sizing: content-box; padding: 10px; background: #fff; border-radius: 8px; }
+
+#address { resize: none; word-break: break-all; }
+.countdown { text-align: center; margin-top: 16px; }
+.countdown strong { font-variant-numeric: tabular-nums; }
+.pay .note { text-align: center; word-break: break-all; }

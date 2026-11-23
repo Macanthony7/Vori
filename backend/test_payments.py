@@ -120,6 +120,19 @@ def demo():
     assert api.get(f"/payments/{btc['id']}", headers=other).status_code == 404  # not your payment
     assert len(api.get("/payments?status=pending", headers=key).json()["payments"]) == 4
 
+    # --- checkout page (public, no API key) -----------------------------------------------------------
+    assert trx["checkout_url"].endswith("/pay/" + trx["id"]), trx
+    r = api.get(f"/pay/{trx['id']}/status")
+    co = r.json()
+    assert r.status_code == 200 and co["address"] == trx["address"] and co["amount_due"] == "10.5", co
+    assert "reference" not in co and "checkout_url" not in co and co["server_time"].endswith("Z"), co
+    assert "no-store" in r.headers["cache-control"]
+    assert api.get(f"/pay/{btc['id']}/status").json().keys() >= {"status", "expires_at"}
+    assert "reference" not in api.get(f"/pay/{btc['id']}/status").text  # merchant's order data stays private
+    assert api.get("/pay/pay_doesnotexist/status").status_code == 404
+    r = api.get(f"/pay/{trx['id']}")
+    assert r.status_code == 200 and "/pay.js" in r.text, r.status_code
+
     # --- watcher with a fake chain -----------------------------------------------------------------
     chain = {}  # address -> (seen, confirmed) in smallest units
     down = set()

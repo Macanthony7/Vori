@@ -4,17 +4,70 @@ The gateway grew out of an earlier **custodial** deposit system (a master seed o
 per-user deposit addresses, sweeping to a main wallet). That code was removed from the repo. The
 last commit that contains it is `b18a440`. This page keeps what's still useful from it.
 
-## Planned
+## Plan
 
-| Item | Why | Notes |
+**The product: a non-custodial wallet that is also a payment gateway.** Think of Trust Wallet with
+a checkout page and an API. Keys stay on the merchant's device, and the server only creates
+addresses from xpubs and watches them. The merchant sees one balance per coin, even though every
+payment arrives on its own fresh address, and moves funds with **Send**, signed on their own device.
+
+Focus: **the payment engine first**. Revenue features wait until the engine is solid.
+
+### Engine (in order)
+
+| # | Item | Why | Notes |
+|---|---|---|---|
+| 1 | **Hosted checkout page** `/pay/{id}` | The payer never saw anything; the address only existed in an API response | **Done:** see [api.md](api.md#checkout-page). Amount, network, address with QR and copy, countdown, live status. No API key: the unguessable payment id is the access token. |
+| 2 | **Transaction hash on payments** | Receipts, explorer links on the checkout page, support | See [Transaction hashes](#transaction-hashes-how-the-prototype-found-them). |
+| 3 | **"Paid late" detection** | Funds arriving after `expired` are invisible today | Keep observing expired payments for 24 h and emit `payment.paid_late`. |
+| 4 | **Wallet dashboard: Balance + Receive** | The merchant needs to see the money in one place | Balance per coin = confirmed payments minus what was sent, summed over **every** issued address (we know every index, so there's no gap limit). Refresh only addresses that hold funds when the dashboard opens; don't poll every address forever. Payment history. Sign in with the API key for now. |
+| 5 | **Send, signed on the merchant's device** | Moving funds without custody | Signed in the offline seed frame; the page only broadcasts the signed transaction. See [Sending and gas](#sending-and-gas). Order: BTC/LTC/DOGE → native ETH/BNB/TRX → USDT. |
+| 6 | **Stop reusing addresses** | Payers never see a repeated address | Reuse exists only because other wallets stop scanning after ~20 empty addresses. Once our wallet (item 4) shows every address, drop it. Keep an opt-in for merchants who spend from another wallet. |
+| 7 | Rate limiting | Abuse, provider quota | `POST /accounts` per IP, `POST /payments` per key, `GET /pay/{id}/status` per IP. |
+| 8 | API key recovery | No email to reset | Sign a challenge with the key at `…/0/0`, verify against the stored xpub. Also the natural dashboard login. |
+| 9 | BlockCypher push hooks | Save BTC/LTC/DOGE quota | See [BlockCypher push hooks](#blockcypher-push-hooks). |
+| 10 | Encrypt xpubs at rest | DB-only leaks | Server-held key. |
+
+### Later: optional
+
+| Item | Notes |
+|---|---|
+| Forwarder contracts ("auto-sweep") | Only if merchants want funds to move without pressing Send. CREATE2 forwarders + a relayer + prepaid gas. Needs a contract audit. Not needed for the wallet model. |
+| Encrypted vault in the browser | So merchants don't retype their phrase for every Send. Riskier: the sandboxed frame can't store anything today. |
+
+### Later: revenue
+
+| Item | Notes |
+|---|---|
+| Free-tier limits + prepaid plans | Count payments per account per month; plans paid through the gateway itself extend `plan_expires_at` (see [overview.md](overview.md#how-we-make-money)). |
+| Checkout swaps ("pay with any coin") | The customer's wallet signs an aggregator swap (1inch / 0x / PancakeSwap) that delivers the merchant's asset to the payment address. Integrator fee = revenue. Non-custodial. Cross-chain only via a partner (ChangeNOW-style), which custodies briefly. |
+
+## Sending and gas
+
+There is **no background sweeper**. Funds stay on their payment addresses until the merchant
+presses Send, and the wallet picks which addresses to spend from, like any HD wallet.
+
+| Asset | What Send does | Gas needed beforehand |
 |---|---|---|
-| Free-tier limits + prepaid plans | Revenue (see [overview.md](overview.md#how-we-make-money)) | Count payments per account per month; plans paid through the gateway itself extend `plan_expires_at`. |
-| Rate limiting | Abuse, provider quota | `POST /accounts` per IP, `POST /payments` per key. |
-| API key recovery | No email to reset | Sign a challenge with the key at `…/0/0`, verify against the stored xpub. |
-| Transaction hash on payments | Receipts, explorer links, support | See below. |
-| BlockCypher push hooks | Save BTC/LTC/DOGE quota | See below. |
-| "Paid late" event | Funds arriving after `expired` are invisible today | Keep observing expired payments for 24 h. |
-| Encrypt xpubs at rest | DB-only leaks | Server-held key. |
+| BTC, LTC, DOGE | One transaction spending as many payment addresses as needed | None: the fee comes out of the coins being sent |
+| ETH, BNB, TRX (native) | One transfer per address that holds funds | None: each address pays its own fee from its balance |
+| USDT on Ethereum, BSC | **EIP-7702:** each payment address signs an authorization on the device; the merchant's main address sends one batch transaction and pays all the gas | Only on the merchant's **main** address |
+| USDT on Tron | The main address stakes TRX and **delegates energy** to the payment addresses, the wallet sends, then reclaims the energy | Only on the main address (TRX staked for energy) |
+
+So for tokens, "sweeping" is a step inside Send, not a job on the server. The problem it solves:
+a fresh payment address holds USDT but no ETH/BNB/TRX, so it can't pay its own transfer fee.
+
+**Rejected: server-side sweeper with keys** (what the prototype did). Signing for a payment
+address needs its private key. A server that does that holds the keys, which is custody: the
+thing this product exists to avoid.
+
+Before building item 5 for tokens, check:
+- The exact Tron bandwidth cost for a payment address that has never sent anything.
+- Which audited EIP-7702 delegate (batch executor) contract to use on Ethereum and BSC, rather than writing our own.
+
+**Tell merchants:** if they import the same phrase into another wallet (Trust Wallet, Electrum),
+that wallet may not show funds past its ~20-address scan limit. The money is safe; our wallet
+shows it.
 
 ## Transaction hashes (how the prototype found them)
 

@@ -8,7 +8,10 @@ from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 HERE = Path(__file__).parent
+load_dotenv(HERE / ".env")  # every module imports db first; real environment variables win
 # ponytail: SQLite (stdlib) for the MVP; move to Postgres/MySQL when running more than one server process.
 DB_PATH = os.getenv("GATEWAY_DB", str(HERE / "gateway.db"))
 

@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; form-action 'none'; base-uri 'none'">
+    <meta name="referrer" content="no-referrer">
+    <meta name="robots" content="noindex">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Payment</title>
+    <!-- Absolute paths: this page is served at /pay/{id} -->
+    <link rel="stylesheet" href="/styles.css">
+    <link rel="stylesheet" href="/pay.css">
+</head>
+<body>
+<main class="pay">
+    <p id="loading" class="lede">Loading payment…</p>
+    <p id="not-found" class="error" role="alert" hidden>This payment doesn't exist. Check the link, or ask the merchant for a new one.</p>
+
+    <section id="payment" hidden>
+        <header>
+            <p class="lede" id="heading">Send exactly</p>
+            <p class="amount"><span id="amount"></span> <span id="asset"></span></p>
+            <p class="network">on <strong id="network"></strong></p>
+        </header>
+
+        <p id="status" class="status" role="status" aria-live="polite"></p>
+
+        <div id="pay-box">
+            <div id="qr" class="qr" aria-hidden="true"></div>
+
+            <label for="address">Address</label>
+            <div class="copy-row">
+                <!-- Wraps instead of scrolling, so the payer can check the whole address -->
+                <textarea id="address" rows="2" readonly spellcheck="false"></textarea>
+                <button type="button" data-copy="address">Copy</button>
+            </div>
+
+            <label for="amount-due">Amount</label>
+            <div class="copy-row">
+                <input id="amount-due" readonly>
+                <button type="button" data-copy="amount-due">Copy</button>
+            </div>
+
+            <p class="countdown">Time left: <strong id="countdown">--:--</strong></p>
+            <p id="network-warning" class="warning"></p>
+        </div>
+
+        <p class="note">Payment <code id="payment-id"></code></p>
+    </section>
+</main>
+<script src="/vendor/kjua.js"></script>
+<script src="/pay.js"></script>
+</body>
+</html>

@@ -151,12 +151,14 @@ Authenticated. Create a payment and get a receive address for it.
   "reference": "order-1042",
   "created_at": "2026-11-22T19:05:11Z",
   "expires_at": "2026-11-22T19:35:11Z",
-  "confirmed_at": null
+  "confirmed_at": null,
+  "checkout_url": "https://pay.example.com/pay/pay_iS2n5H0pWQ3kq1HcX9yN0A"
 }
 ```
 
-Show the customer `address`, `amount`, `asset` and the network. For tokens, the network matters:
-USDT sent on the wrong chain won't be seen.
+Send the customer to `checkout_url` (see [Checkout page](#checkout-page)), or show `address`,
+`amount`, `asset` and the network yourself. For tokens, the network matters: USDT sent on the
+wrong chain won't be seen.
 
 **400**: unsupported chain/asset, bad amount, too long `reference`, or no xpub registered for that
 chain (`no LTC xpub is registered on this account`). **401**: bad key.
@@ -187,6 +189,61 @@ Authenticated. Newest first.
 ```json
 { "payments": [ { "id": "pay_…", "status": "confirmed", "…": "…" } ] }
 ```
+
+## Checkout page
+
+`GET /pay/{id}`: a hosted page for the **payer**. Redirect or link the customer to the payment's
+`checkout_url`. No API key: the payment id (128 random bits) is the access token, so treat the
+link like the payment itself and only give it to that customer.
+
+The page shows the amount, the network ("USDT on Tron (TRC-20)"), a QR code, the address and
+amount with Copy buttons, a countdown to `expires_at`, and a warning to send only that asset on
+that network. It refreshes every 5 s and follows the status:
+
+| Status | The payer sees | Address shown |
+|---|---|---|
+| `pending`, nothing received | "Waiting for your payment…" | yes |
+| `pending`, part received | "Received 4 of 10.5 USDT. Send the remaining 6.5 USDT to the same address." | yes, amount = what's left |
+| `pending`, time is up | "Time is up. Checking the network for your payment…" (the watcher hasn't decided yet) | no |
+| `confirming` | "Payment received. Waiting for N network confirmations. You can close this page." | no |
+| `confirmed` | "Paid. Thank you." | no |
+| `expired` | Don't send anything; ask the merchant for a new payment (or contact them if part was received) | no |
+
+The address is hidden once sending is no longer useful, so nobody pays into an expired payment.
+QR codes for BTC, LTC and DOGE are BIP21 URIs with the amount (`bitcoin:<address>?amount=0.001`).
+For Ethereum, BSC and Tron the QR is the **bare address**: payment URIs there are read
+inconsistently by wallets and could send the wrong token.
+
+The page has no merchant name, no logo and no return link yet.
+
+### `GET /pay/{id}/status`
+
+Public, no API key. The data behind the checkout page. **404** if the payment doesn't exist.
+
+```json
+{
+  "id": "pay_iS2n5H0pWQ3kq1HcX9yN0A",
+  "status": "pending",
+  "chain": "TRX",
+  "asset": "USDT",
+  "address": "TA891Fu7vVz595BGQpNX2MCzr7yBcxuoC7",
+  "amount": "10.5",
+  "amount_received": "4",
+  "amount_confirmed": "0",
+  "amount_due": "6.5",
+  "confirmations_required": 20,
+  "token_contract": "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t",
+  "created_at": "2026-11-23T10:00:00Z",
+  "expires_at": "2026-11-23T10:30:00Z",
+  "confirmed_at": null,
+  "server_time": "2026-11-23T10:01:12Z"
+}
+```
+
+Same fields as the payment object **minus `reference`** (your order data stays private), plus
+`amount_due` (amount minus received, never below 0) and `server_time` (so the countdown is right
+even when the payer's clock is wrong). Don't use it from your server: use the authenticated
+`GET /payments/{id}`.
 
 ## Payment statuses
 
@@ -297,7 +354,7 @@ function verify(secret, rawBody, header, tolerance = 300) {
 ## Response headers
 
 Every response: `Content-Security-Policy: frame-ancestors 'self'`, `X-Content-Type-Options: nosniff`,
-`Referrer-Policy: no-referrer`. `/accounts*` and `/payments*` also send `Cache-Control: no-store`.
+`Referrer-Policy: no-referrer`. `/accounts*`, `/payments*` and `/pay/*` also send `Cache-Control: no-store`.
 
 ## Example session
 

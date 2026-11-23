@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, Header, HTTPException, Request, Response
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -42,7 +43,7 @@ async def security_headers(request: Request, call_next):
     response.headers["Content-Security-Policy"] = "frame-ancestors 'self'"
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "no-referrer"
-    if request.url.path.startswith(("/accounts", "/payments")):
+    if request.url.path.startswith(("/accounts", "/payments", "/pay/")):
         response.headers["Cache-Control"] = "no-store"  # API keys and payment data must not sit in caches
     return response
 
@@ -189,6 +190,23 @@ def list_payments(status: Optional[str] = None, limit: int = 50, authorization: 
     with closing(db.connect()) as conn:
         rows = conn.execute(query + " ORDER BY created_at DESC, rowid DESC LIMIT ?", (*params, limit)).fetchall()
     return {"payments": [payments.public(p) for p in rows]}
+
+
+# --- Checkout (public, for the payer) ---------------------------------------------------------------
+
+@app.get("/pay/{payment_id}/status")
+def checkout_status(payment_id: str):
+    # ponytail: no rate limit yet (roadmap item 7); ids are 128-bit random, so guessing one is hopeless.
+    with closing(db.connect()) as conn:
+        p = conn.execute("SELECT * FROM payments WHERE id = ?", (payment_id,)).fetchone()
+    if not p:
+        fail(404, "payment not found")
+    return payments.checkout(p)
+
+
+@app.get("/pay/{payment_id}", include_in_schema=False)
+def checkout_page(payment_id: str):
+    return FileResponse(PUBLIC / "pay.html")  # the page loads its data from /pay/{id}/status
 
 
 # Frontend (onboarding pages). Mounted last so API routes win.

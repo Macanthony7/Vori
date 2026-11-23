@@ -52,6 +52,7 @@ fill it in. Never commit `.env`.
 | `BSC_RPC_URL` | BNB, USDT-BEP20 | e.g. `https://rpc.ankr.com/bsc/<key>` |
 | `TRONGRID_URL` | TRX, USDT-TRC20 | Default `https://api.trongrid.io` |
 | `TRONGRID_API_KEY` | TRX, USDT-TRC20 | Optional, raises the rate limit |
+| `GATEWAY_PUBLIC_URL` | API | Public base URL, used to build `checkout_url` (default `http://localhost:8000`). Set it in production. |
 | `GATEWAY_DB` | all | SQLite path (default `backend/gateway.db`) |
 | `GATEWAY_ALLOW_PRIVATE_WEBHOOKS` | webhooks | `1` = allow `http://` and private/loopback webhook URLs. **Development only.** |
 
@@ -134,9 +135,9 @@ against that commit to review them.
 - [ ] Serve over **HTTPS only**. `crypto.getRandomValues` and the clipboard need a secure context, and the security model assumes the HTML isn't tampered with in transit.
 - [ ] Run the API behind a reverse proxy (nginx or Caddy), from `backend/`: `uvicorn app:app --host 127.0.0.1 --port 8000 --workers 1`. Use a single worker while on SQLite. Deploy `frontend/` next to `backend/`, because the API serves `../frontend/public`.
 - [ ] Run the watcher as a service (`python watcher.py`), or from cron every minute with `--max-seconds 280` on hosts that kill long jobs (cPanel). The lock keeps it to one instance.
-- [ ] Fill in `backend/.env` with paid provider keys (see [Providers](#providers)).
+- [ ] Fill in `backend/.env` with paid provider keys (see [Providers](#providers)) and set `GATEWAY_PUBLIC_URL` to the HTTPS address customers will open.
 - [ ] If the proxy serves `frontend/public/` itself, copy the security headers from `backend/app.py` (`frame-ancestors 'self'`, `nosniff`, `no-referrer`).
 - [ ] Never set `GATEWAY_ALLOW_PRIVATE_WEBHOOKS` in production.
-- [ ] Add rate limiting on `POST /accounts` and `POST /payments`.
+- [ ] Add rate limiting on `POST /accounts`, `POST /payments` and `GET /pay/{id}/status`.
 - [ ] Back up `backend/gateway.db`. It holds xpubs, API key hashes, webhook secrets and payment history.
 - [ ] On shared cPanel hosting, the watcher works from cron (`* * * * * cd /path/backend && python watcher.py --max-seconds 280`). The API is the harder part: cPanel's "Setup Python App" runs WSGI, and FastAPI is ASGI, so it needs the `a2wsgi` adapter. A small VPS is simpler.

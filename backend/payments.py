@@ -3,6 +3,7 @@
 Docs: docs/architecture.md#payments
 """
 import json
+import os
 import secrets
 from datetime import datetime, timedelta, timezone
 
@@ -16,6 +17,10 @@ REUSE_AFTER = timedelta(hours=24)     # quarantine before an unpaid address can 
 CHECK_EVERY = {"BTC": 60, "LTC": 60, "DOGE": 60, "ETH": 15, "BSC": 10, "TRX": 10}  # seconds
 OPEN = ("pending", "confirming")
 EVENTS = {"confirming": "payment.confirming", "confirmed": "payment.confirmed", "expired": "payment.expired"}
+PUBLIC_URL = os.getenv("GATEWAY_PUBLIC_URL", "http://localhost:8000").rstrip("/")  # base of checkout links
+# What the payer's checkout page may see. Not `reference` (the merchant's own order data).
+CHECKOUT_FIELDS = ("id", "status", "chain", "asset", "address", "amount", "amount_received", "amount_confirmed",
+                   "confirmations_required", "token_contract", "created_at", "expires_at", "confirmed_at")
 
 
 class PaymentError(ValueError):
@@ -146,4 +151,14 @@ def public(p):
         "created_at": p["created_at"],
         "expires_at": p["expires_at"],
         "confirmed_at": p["confirmed_at"],
+        "checkout_url": f"{PUBLIC_URL}/pay/{p['id']}",
     }
+
+
+def checkout(p, now=None):
+    """What the public checkout page gets: no API key, the unguessable payment id is the access token."""
+    _, spec = lookup(p["chain"], p["asset"])
+    out = {k: v for k, v in public(p).items() if k in CHECKOUT_FIELDS}
+    out["amount_due"] = from_units(max(0, int(p["amount"]) - int(p["received"])), spec["decimals"])
+    out["server_time"] = db.at(now or datetime.now(timezone.utc))  # lets the page correct its clock for the countdown
+    return out
