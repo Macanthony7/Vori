@@ -97,7 +97,7 @@ are single use and expire after 5 minutes. The session token lives only in the p
   [roadmap.md](roadmap.md).
 - **Clearing site data deletes the vault.** The funds are safe; the merchant restores from the phrase.
 
-## Sending (BTC, LTC, DOGE, native ETH / BNB)
+## Sending
 
 The send steps follow Gem Wallet's: **the server prepares, the offline frame plans, shows and signs, the
 server relays.**
@@ -127,12 +127,33 @@ valid on. It only signs plain transfers with a 21,000 gas limit and refuses fee 
 shows "up to" the fee (the most each transfer can cost) and how many transfers there are, since
 every funded address sends its own.
 
+**Tron specifics (TRX, Nile).** The server supplies the latest block header, which a Tron
+transaction must reference; a wrong header only makes the network reject it. The frame signs
+transfers that expire after 20 minutes, reserves the network fee per address (bandwidth, or the
+1.1 TRX for activating a new destination) and relays the signed protobuf (`raw_data` + signature).
+
+**USDT (ERC-20 / TRC-20) and gas top-ups.** Token contracts and decimals are pinned in the frame per
+chain, never taken from the server (USDT has 18 decimals on BSC, 6 elsewhere). The main address
+(index 0, re-derived like every other) pays gas: for each payment address without enough
+ETH/BNB/TRX, the frame signs a top-up from the main address worth that address's worst-case token
+fee, then the token transfers. The server's gas/energy estimates are bounded (≤ 200,000 gas; Tron
+fee limit ≤ 100 TRX) and get a 20–25% margin. If the main address can't cover all of it, the frame
+says how much to add and signs nothing. The page relays top-ups first and the token transfers only
+after every top-up has confirmed; if they don't confirm within 3 minutes, no token moves and Send
+can simply be retried (the gas already delivered is then used). A wrong estimate from the server
+can only make a transfer fail or leave more dust, never redirect funds.
+
 Checked: Ethereum signing matches the EIP-155 reference transaction byte for byte; a Bitcoin
 transaction with two inputs from two of our legacy addresses, and a Tron USDT transfer, were
 verified by an independent Python check (signatures, sighash, outputs, txID); the same Bitcoin
 transaction signed in the browser frame verified too. A Sepolia EIP-1559 transfer signed in the
 browser frame with live nonce and fee data was decoded independently: chain id, nonce, fees, value
-and the recovered sender all matched.
+and the recovered sender all matched. With live Sepolia and Nile data, the browser frame signed a
+Sepolia USDT send from two payment addresses (2 top-ups from the main address, nonces in order), a
+Nile USDT send with an activating top-up and a Nile TRX transfer; an independent Python decoder
+recovered every signer and matched chain id, nonces, gas, contract, recipient, amounts, Tron fee
+limit, block reference and txID. The frame refused a planted address, a main address short of gas,
+and a TRX amount that didn't leave room for activating a new destination.
 
 ## Input validation (server)
 

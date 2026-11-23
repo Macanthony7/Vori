@@ -17,13 +17,14 @@ from typing import Optional
 from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from bip_utils import Base58Decoder
 from coincurve import PublicKey
 from pydantic import BaseModel, Field
 
 import chain_client
 import db
 import payments
-from assets import ASSETS, EVM_CHAINS, AmountError, from_units
+from assets import ASSETS, EVM_CHAINS, TRON_CHAINS, AmountError, from_units
 from webhooks import WebhookError, check_url
 from xpubs import CHAINS, XpubError, address, normalize, public_key
 
@@ -292,9 +293,11 @@ def wallet_balances(authorization: str = Header(None)):
     return {"balances": out}
 
 
-# --- Wallet send (BTC / LTC / DOGE, and native ETH / BNB / Sepolia ETH) ---------------------------
-# The server only reads balances/coins and relays signed transactions. Planning, the confirm screen
-# and signing happen in the offline frame, which also re-derives every listed address before signing.
+# --- Wallet send ----------------------------------------------------------------------------------
+# BTC / LTC / DOGE, native ETH / BNB / TRX, and USDT on Ethereum, BNB Smart Chain and Tron (plus the
+# test networks). The server only reads balances and relays signed transactions. Planning, the confirm
+# screen and signing happen in the offline frame, which also re-derives every listed address before
+# signing and pins chain ids, token contracts and decimals itself. Docs: docs/api.md#wallet
 UTXO_CHAINS = ("BTC", "LTC", "DOGE")
 EVM_GAS_LIMIT = 21000  # a plain native transfer
 
@@ -310,47 +313,96 @@ def wallet_addresses(account_id, xpub_chain, xpub):
     return out
 
 
-def sendable(chain):
+def sendable(chain, asset=None):
+    """(kind, asset, contract or None). Test networks exist only with GATEWAY_TESTNETS=1."""
     if chain in UTXO_CHAINS:
-        return "utxo"
-    evm = EVM_CHAINS.get(chain)
-    if evm and (chain, evm["native"]) in ASSETS:  # Sepolia only with GATEWAY_TESTNETS=1
-        return "evm"
-    fail(400, f"sending {chain} isn't supported yet")
+        kind, native = "utxo", chain
+    elif chain in EVM_CHAINS:
+        kind, native = "evm", EVM_CHAINS[chain]["native"]
+    elif chain in TRON_CHAINS:
+        kind, native = "tron", "TRX"
+    else:
+        kind = native = None
+    asset = (asset or native or "").upper()
+    if not kind or (chain, asset) not in ASSETS or (kind == "utxo" and asset != native):
+        fail(400, f"sending {asset} on {chain} isn't supported")
+    return kind, asset, ASSETS[(chain, asset)]["contract"]
+
+
+def tron_address_ok(text):
+    try:
+        raw = Base58Decoder.CheckDecode(text)
+    except Exception:  # bip_utils raises its own checksum/format errors
+        return False
+    return len(raw) == 21 and raw[0] == 0x41
+
+
+def pool_map(fn, items, workers=8):
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        return list(pool.map(fn, items))
 
 
 @app.get("/wallet/send/{chain}")
-def send_prepare(chain: str, authorization: str = Header(None)):
+def send_prepare(chain: str, asset: Optional[str] = None, to: Optional[str] = None, authorization: str = Header(None)):
     acct = account_for(authorization)
     chain = chain.upper()
-    kind = sendable(chain)
-    xpub_chain = chain if kind == "utxo" else "ETH"
+    kind, asset, contract = sendable(chain, asset)
+    xpub_chain = {"utxo": chain, "evm": "ETH", "tron": "TRX"}[kind]
     with closing(db.connect()) as conn:
         row = conn.execute("SELECT xpub FROM account_xpubs WHERE account_id = ? AND chain = ?",
                            (acct["id"], xpub_chain)).fetchone()
     if not row:
         fail(400, f"no {xpub_chain} xpub is registered on this account")
     addrs = wallet_addresses(acct["id"], xpub_chain, row["xpub"])
+    to = (to or "").strip()
+    if (kind == "tron" or contract) and not to:
+        fail(400, "`to` is required: fees depend on the destination")
+    if to and kind == "evm" and not (len(to) == 42 and to.startswith("0x")):
+        fail(400, "that isn't a valid address (0x…)")
+    if to and kind == "tron" and not tron_address_ok(to):
+        fail(400, "that isn't a valid Tron address (T…)")
+    out = {"chain": chain, "kind": kind, "asset": asset}
     try:
         if kind == "utxo":
-            with ThreadPoolExecutor(max_workers=3) as pool:  # BlockCypher allows ~3 requests/s without a token
-                found = list(pool.map(lambda a: chain_client.unspent(chain, a), addrs))
-            fees = chain_client.fee_rates(chain)
-        else:
-            with ThreadPoolExecutor(max_workers=8) as pool:
-                accounts = list(pool.map(lambda a: chain_client.evm_account(chain, a), addrs))
-            fees = chain_client.evm_fees(chain)
+            found = pool_map(lambda a: chain_client.unspent(chain, a), addrs, 3)  # BlockCypher: ~3 requests/s without a token
+            utxos = [{"address": a, "index": addrs[a], **u} for a, us in zip(addrs, found) for u in us]
+            return {**out, "utxos": utxos, "fee_per_byte": chain_client.fee_rates(chain), "change_index": MAIN_INDEX,
+                    "change_address": address(chain, row["xpub"], MAIN_INDEX)}
+
+        if kind == "evm":
+            out.update(chain_id=EVM_CHAINS[chain]["chain_id"], gas_limit=EVM_GAS_LIMIT, fees=chain_client.evm_fees(chain))
+            accounts = pool_map(lambda a: chain_client.evm_account(chain, a), addrs)
+            listed = [{"address": a, "index": addrs[a], "balance": str(bal), "nonce": nonce}
+                      for a, (bal, nonce) in zip(addrs, accounts)]
+            if not contract:  # each funded address sends its own transfer and pays its own fee
+                return {**out, "sources": [s for s in listed if s["balance"] != "0"]}
+            tokens = pool_map(lambda a: chain_client.token_balance(chain, contract, a), addrs)
+            for s, t in zip(listed, tokens):
+                s["token_balance"] = str(t)
+            funded = [s for s in listed if s["token_balance"] != "0"]
+            gas = pool_map(lambda s: chain_client.evm_token_gas(chain, contract, s["address"], to, int(s["token_balance"])), funded)
+            for s, g in zip(funded, gas):
+                s["token_gas"] = g
+            # The main address pays gas: it tops up each payment address that lacks it.
+            return {**out, "main": next(s for s in listed if s["index"] == MAIN_INDEX), "sources": funded}
+
+        out.update(params=chain_client.tron_params(chain), block=chain_client.tron_block(chain),
+                   to_active=chain_client.tron_account(chain, to)["active"] if to else False)
+        accounts = pool_map(lambda a: chain_client.tron_account(chain, a), addrs, 4)  # TronGrid: ~15 requests/s keyless
+        listed = [{"address": a, "index": addrs[a], **{k: (str(v) if k == "balance" else v) for k, v in acct_.items()}}
+                  for a, acct_ in zip(addrs, accounts)]
+        if not contract:
+            return {**out, "sources": [s for s in listed if s["balance"] != "0"]}
+        tokens = pool_map(lambda a: chain_client.observe(chain, asset, a, 1)[0], addrs, 4)
+        for s, t in zip(listed, tokens):
+            s["token_balance"] = str(t)
+        funded = [s for s in listed if s["token_balance"] != "0"]
+        energy = pool_map(lambda s: chain_client.tron_token_energy(chain, contract, s["address"], to, int(s["token_balance"])), funded, 4)
+        for s, e in zip(funded, energy):
+            s["token_energy"] = e
+        return {**out, "main": next(s for s in listed if s["index"] == MAIN_INDEX), "sources": funded}
     except chain_client.ChainError as e:
         fail(502, f"couldn't read the {chain} network right now ({e}); try again in a minute")
-    if kind == "utxo":
-        utxos = [{"address": a, "index": addrs[a], **u} for a, us in zip(addrs, found) for u in us]
-        return {"chain": chain, "kind": kind, "utxos": utxos, "fee_per_byte": fees, "change_index": MAIN_INDEX,
-                "change_address": address(chain, row["xpub"], MAIN_INDEX)}
-    # Each address with a balance sends its own transaction and pays its own fee.
-    sources = [{"address": a, "index": addrs[a], "balance": str(bal), "nonce": nonce}
-               for a, (bal, nonce) in zip(addrs, accounts) if bal > 0]
-    return {"chain": chain, "kind": kind, "asset": EVM_CHAINS[chain]["native"], "chain_id": EVM_CHAINS[chain]["chain_id"],
-            "gas_limit": EVM_GAS_LIMIT, "fees": fees, "sources": sources}
 
 
 class Broadcast(BaseModel):
@@ -361,11 +413,11 @@ class Broadcast(BaseModel):
 def send_broadcast(chain: str, body: Broadcast, authorization: str = Header(None)):
     account_for(authorization)  # ponytail: any signed tx is relayed; signing is what protects funds
     chain = chain.upper()
-    kind = sendable(chain)
+    kind = sendable(chain)[0]
     txs = [t.strip().removeprefix("0x") for t in body.txs]
     if any(len(t) < 20 or len(t) > 200_000 or any(c not in "0123456789abcdefABCDEF" for c in t) for t in txs):
         fail(422, "each transaction must be hex")
-    relay = chain_client.broadcast if kind == "utxo" else chain_client.evm_broadcast
+    relay = {"utxo": chain_client.broadcast, "evm": chain_client.evm_broadcast, "tron": chain_client.tron_broadcast}[kind]
     hashes, error = [], None
     for tx in txs:  # in order; stop at the first rejection and report what went through
         try:
@@ -378,6 +430,23 @@ def send_broadcast(chain: str, body: Broadcast, authorization: str = Header(None
     if error and not hashes:
         fail(502, error)
     return {"chain": chain, "tx_hashes": hashes, "error": error}
+
+
+@app.get("/wallet/tx/{chain}/{tx_hash}")
+def tx_status(chain: str, tx_hash: str, authorization: str = Header(None)):
+    """Has a relayed transaction landed? Used to wait for gas top-ups before sending tokens."""
+    account_for(authorization)
+    chain = chain.upper()
+    if sendable(chain)[0] == "utxo":
+        fail(400, "not available for this chain")
+    h = tx_hash.lower().removeprefix("0x")
+    if len(h) != 64 or any(c not in "0123456789abcdef" for c in h):
+        fail(422, "bad transaction hash")
+    try:
+        ok = chain_client.tx_status(chain, ("0x" + h) if chain in EVM_CHAINS else h)
+    except chain_client.ChainError as e:
+        fail(502, f"couldn't read the {chain} network right now ({e})")
+    return {"done": ok is not None, "ok": bool(ok)}
 
 
 # --- Payments -------------------------------------------------------------------------------------

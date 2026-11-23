@@ -70,12 +70,14 @@
                 <label for="send-amount">Amount</label>
                 <input id="send-amount" inputmode="decimal" autocomplete="off">
                 <label class="check"><input type="checkbox" id="send-max"> Send everything (the fee comes out of it)</label>
-                <label for="send-speed">Network fee</label>
-                <select id="send-speed">
-                    <option value="slow">Slow (cheapest)</option>
-                    <option value="normal" selected>Normal</option>
-                    <option value="fast">Fast</option>
-                </select>
+                <div id="send-speed-box">
+                    <label for="send-speed">Network fee</label>
+                    <select id="send-speed">
+                        <option value="slow">Slow (cheapest)</option>
+                        <option value="normal" selected>Normal</option>
+                        <option value="fast">Fast</option>
+                    </select>
+                </div>
                 <p class="error" id="send-error" role="alert"></p>
                 <button type="button" id="send-review">Review</button>
             </section>

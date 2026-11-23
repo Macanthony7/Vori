@@ -87,7 +87,7 @@ sequenceDiagram
     S->>P: {tx_hash} → explorer link
 ```
 
-Details and checks: [security.md](security.md#sending-btc-ltc-doge).
+Details and checks: [security.md](security.md#sending).
 
 ### Use xpub keys
 

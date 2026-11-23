@@ -9,6 +9,8 @@
 - `backend/requirements.txt` replaces the old root `requirements.txt`.
 
 ### Added
+- **Send TRX and USDT** (Ethereum, BNB Smart Chain, Tron). Gas for USDT comes from the main address: the frame signs a top-up to each payment address that lacks gas plus the token transfers, and the page relays the token transfers once the top-ups have confirmed (new `GET /wallet/tx/{chain}/{hash}`). Token contracts and decimals are pinned in the frame. `GET /wallet/send/{chain}` takes `asset` and `to`.
+- **Test networks:** Tron Nile (TRX, USDT) and Sepolia USDT, behind `GATEWAY_TESTNETS=1`.
 - **New payment form** on the wallet dashboard: pick an amount and a coin/network, get a fresh address and a link to its checkout page (`POST /payments` with the wallet session).
 - **Send native ETH and BNB** (and Sepolia ETH). Each funded wallet address sends its own transfer and pays its own fee; the frame pins chain ids, signs only 21,000-gas transfers and shows "up to" fees and the number of transfers. EIP-1559 fees from `eth_feeHistory` (BSC: legacy gas price). `POST /wallet/send/{chain}` now takes `{"txs": [...]}` and reports a part-way rejection.
 - **Sepolia test network** behind `GATEWAY_TESTNETS=1` (`SEPOLIA_RPC_URL`): checkout payments, watcher, balances and sending, for testing the whole loop with free test ETH. See `docs/setup.md#testing-with-sepolia-test-eth`.

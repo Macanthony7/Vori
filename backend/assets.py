@@ -30,10 +30,16 @@ ASSETS = {
 TESTNETS = os.getenv("GATEWAY_TESTNETS") == "1"
 if TESTNETS:
     ASSETS[("SEPOLIA", "ETH")] = dict(xpub="ETH", decimals=18, confirmations=3, contract=None)
+    # Aave's Sepolia faucet USDT (app.aave.com/faucet, testnet mode). 6 decimals like real USDT.
+    ASSETS[("SEPOLIA", "USDT")] = dict(xpub="ETH", decimals=6, confirmations=3, contract="0xaA8E23Fb1079EA71e0a56F48a2aA51851D8433D0")
+    # Tron Nile testnet (nileex.io faucet gives TRX and this test USDT).
+    ASSETS[("NILE", "TRX")] = dict(xpub="TRX", decimals=6, confirmations=20, contract=None)
+    ASSETS[("NILE", "USDT")] = dict(xpub="TRX", decimals=6, confirmations=20, contract="TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf")
 
 # EVM chains: chain id used when signing (EIP-155 replay protection) and the native asset.
 EVM_CHAINS = {"ETH": dict(chain_id=1, native="ETH"), "BSC": dict(chain_id=56, native="BNB"),
               "SEPOLIA": dict(chain_id=11155111, native="ETH")}
+TRON_CHAINS = ("TRX", "NILE")  # native asset TRX on both
 
 MAX_UNITS = 10**15  # cap per payment, in whole coins/tokens
 

@@ -18,17 +18,25 @@
         "BSC/USDT": ["USDT", "BNB Smart Chain (BEP-20)"],
         "TRX/TRX": ["TRX", "Tron"],
         "TRX/USDT": ["USDT", "Tron (TRC-20)"],
-        "SEPOLIA/ETH": ["ETH", "Sepolia testnet (no real value)"]
+        "SEPOLIA/ETH": ["ETH", "Sepolia testnet (no real value)"],
+        "SEPOLIA/USDT": ["USDT", "Sepolia testnet (ERC-20, no real value)"],
+        "NILE/TRX": ["TRX", "Tron Nile testnet (no real value)"],
+        "NILE/USDT": ["USDT", "Tron Nile testnet (TRC-20, no real value)"]
     };
-    // Chain -> its native asset, for the assets that can be sent so far (docs/roadmap.md).
-    var SENDABLE = { BTC: "BTC", LTC: "LTC", DOGE: "DOGE", ETH: "ETH", BSC: "BNB", SEPOLIA: "ETH" };
+    // What can be sent so far (docs/roadmap.md), as "CHAIN/ASSET".
+    var SENDABLE = ["BTC/BTC", "LTC/LTC", "DOGE/DOGE", "ETH/ETH", "ETH/USDT", "BSC/BNB", "BSC/USDT", "TRX/TRX", "TRX/USDT",
+                    "SEPOLIA/ETH", "SEPOLIA/USDT", "NILE/TRX", "NILE/USDT"];
+    var TRON = { TRX: true, NILE: true };
+    var TOPUP_WAIT_MS = 180000;
     var EXPLORER = {
         BTC: "https://blockchair.com/bitcoin/transaction/",
         LTC: "https://blockchair.com/litecoin/transaction/",
         DOGE: "https://blockchair.com/dogecoin/transaction/",
         ETH: "https://etherscan.io/tx/",
         BSC: "https://bscscan.com/tx/",
-        SEPOLIA: "https://sepolia.etherscan.io/tx/"
+        SEPOLIA: "https://sepolia.etherscan.io/tx/",
+        TRX: "https://tronscan.org/#/transaction/",
+        NILE: "https://nile.tronscan.org/#/transaction/"
     };
     var STATUS = { pending: "Waiting", confirming: "Confirming", confirmed: "Paid", expired: "Expired" };
 
@@ -187,7 +195,7 @@
             button.setAttribute("aria-label", "Receive " + name[0] + " on " + name[1]);
             button.addEventListener("click", function () { showReceive(b); });
             buttons.appendChild(button);
-            if (SENDABLE[b.chain] === b.asset) {
+            if (SENDABLE.indexOf(b.chain + "/" + b.asset) >= 0) {
                 var sendButton = el("button", "secondary", "Send");
                 sendButton.type = "button";
                 sendButton.setAttribute("aria-label", "Send " + name[0]);
@@ -270,10 +278,12 @@
     });
 
     // --- Send ---------------------------------------------------------------------------------------
-    var sendChain = null;
+    var sendChain = null, sendAsset = null;
 
     function showSend(b) {
         sendChain = b.chain;
+        sendAsset = b.asset;
+        $id("send-speed-box").hidden = !!TRON[b.chain]; // Tron fees are fixed by the network
         $id("send-title").textContent = "Send " + b.asset;
         $id("send-network").textContent = label(b.chain, b.asset)[1];
         $id("send-to").value = "";
@@ -314,7 +324,7 @@
         button.disabled = true;
         $id("send-result").hidden = true;
         try {
-            var prep = await api("GET", "/wallet/send/" + sendChain);
+            var prep = await api("GET", "/wallet/send/" + sendChain + "?asset=" + encodeURIComponent(sendAsset) + "&to=" + encodeURIComponent(to));
         } catch (err) {
             $id("send-error").textContent = err.message;
             button.disabled = false;
@@ -322,11 +332,18 @@
         }
         showSigner();
         var speed = $id("send-speed").value;
-        var request = { id: String(Date.now()), chain: sendChain, to: to, amount: amount, max: max };
+        var request = { id: String(Date.now()), chain: sendChain, asset: sendAsset, to: to, amount: amount, max: max };
         if (prep.kind === "evm") {
             request.fee = prep.fees[speed];
             request.gas_limit = prep.gas_limit;
             request.sources = prep.sources;
+            request.main = prep.main;
+        } else if (prep.kind === "tron") {
+            request.params = prep.params;
+            request.block = prep.block;
+            request.to_active = prep.to_active;
+            request.sources = prep.sources;
+            request.main = prep.main;
         } else {
             request.fee_per_byte = prep.fee_per_byte[speed];
             request.utxos = prep.utxos;
@@ -352,26 +369,65 @@
         frame.contentWindow.postMessage({ type: "engine-files", files: files }, "*", transfer);
     }
 
-    async function broadcastSigned(msg) {
-        hideSigner();
-        $id("send-review").disabled = false;
-        try {
-            var r = await api("POST", "/wallet/send/" + msg.chain, { txs: msg.txs });
-        } catch (err) {
-            $id("send-error").textContent = "Not sent: " + err.message;
-            return;
-        }
-        $id("send").hidden = true;
-        var result = $id("send-result");
-        result.textContent = (r.error ? "Partly sent: " + r.tx_hashes.length + " of " + msg.txs.length + " transfers went through. " + r.error + " "
-                                      : "Sent " + msg.amount + " " + msg.symbol + " to " + msg.to + " (network fee " + msg.fee + " " + msg.symbol + "). ");
-        r.tx_hashes.forEach(function (hash, i) {
-            var link = el("a", "", r.tx_hashes.length > 1 ? "Transfer " + (i + 1) : "View transaction");
-            link.href = EXPLORER[msg.chain] + encodeURIComponent(hash);
+    function txLinks(result, chain, hashes, name) {
+        hashes.forEach(function (hash, i) {
+            var link = el("a", "", name + (hashes.length > 1 ? " " + (i + 1) : ""));
+            link.href = EXPLORER[chain] + encodeURIComponent(hash.replace(/^0x/, chain in TRON ? "" : "0x"));
             link.rel = "noreferrer";
             link.target = "_blank";
             result.append(link, " ");
         });
+    }
+
+    // Gas top-ups must land before the token transfers that spend them are relayed.
+    async function waitFor(chain, hashes) {
+        var until = Date.now() + TOPUP_WAIT_MS;
+        while (Date.now() < until) {
+            await new Promise(function (r) { setTimeout(r, 3000); });
+            var states = await Promise.all(hashes.map(function (h) {
+                return api("GET", "/wallet/tx/" + chain + "/" + encodeURIComponent(h)).catch(function () { return { done: false }; });
+            }));
+            if (states.some(function (st) { return st.done && !st.ok; })) return "a gas top-up failed on the network";
+            if (states.every(function (st) { return st.done; })) return null;
+        }
+        return "the gas top-ups haven't confirmed yet";
+    }
+
+    async function broadcastSigned(msg) {
+        hideSigner();
+        $id("send-review").disabled = false;
+        var result = $id("send-result");
+        var topups = msg.topups || [];
+        if (topups.length) {
+            try {
+                var t = await api("POST", "/wallet/send/" + msg.chain, { txs: topups });
+            } catch (err) {
+                $id("send-error").textContent = "Not sent: " + err.message;
+                return;
+            }
+            $id("send").hidden = true;
+            result.textContent = "Sending gas from your main address to " + topups.length + " payment address" + (topups.length > 1 ? "es" : "") + ", then the transfer. Keep this page open… ";
+            txLinks(result, msg.chain, t.tx_hashes, "Gas top-up");
+            result.hidden = false;
+            var problem = t.error || await waitFor(msg.chain, t.tx_hashes);
+            if (problem) {
+                result.textContent = "Not sent: " + problem + ". No " + msg.symbol + " moved. Any gas that arrived stays on those addresses; try Send again in a minute. ";
+                txLinks(result, msg.chain, t.tx_hashes, "Gas top-up");
+                loadBalances();
+                return;
+            }
+        }
+        try {
+            var r = await api("POST", "/wallet/send/" + msg.chain, { txs: msg.txs });
+        } catch (err) {
+            if (topups.length) { result.textContent = "Gas was sent, but the transfer wasn't: " + err.message + ". Try Send again."; result.hidden = false; }
+            else $id("send-error").textContent = "Not sent: " + err.message;
+            return;
+        }
+        $id("send").hidden = true;
+        result.textContent = (r.error ? "Partly sent: " + r.tx_hashes.length + " of " + msg.txs.length + " transfers went through. " + r.error + " "
+                                      : "Sent " + msg.amount + " " + msg.symbol + " to " + msg.to + " (network fee " + msg.fee + "). ");
+        txLinks(result, msg.chain, r.tx_hashes, r.tx_hashes.length > 1 ? "Transfer" : "View transaction");
         result.hidden = false;
         loadBalances();
     }

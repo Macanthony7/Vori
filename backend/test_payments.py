@@ -107,6 +107,49 @@ def check_evm_send(key):
         cc.evm_account, cc.evm_fees, cc.evm_broadcast = real
 
 
+def check_token_send(key):
+    """USDT and TRX: the main address is listed for gas, only token-holding addresses are sources,
+    the destination is required, and top-ups can be followed with /wallet/tx."""
+    cc = app_module.chain_client
+    names = ("evm_account", "evm_fees", "token_balance", "evm_token_gas", "tron_params", "tron_block",
+             "tron_account", "observe", "tron_token_energy", "tron_broadcast", "tx_status")
+    real = {n: getattr(cc, n) for n in names}
+    eth_main, trx_main = address("ETH", CASES["ETH"][0], 0), address("TRX", CASES["TRX"][0], 0)
+    to_trx = address("TRX", CASES["TRX"][0], 9)
+    cc.evm_account = lambda chain, a: (10**17, 5)
+    cc.evm_fees = lambda chain: {"type": "eip1559", "normal": {"max_fee_per_gas": "30", "max_priority_fee_per_gas": "2"}}
+    cc.token_balance = lambda chain, contract, a: 0  # nobody holds USDT yet
+    cc.evm_token_gas = lambda *a: 50000
+    cc.tron_params = lambda chain: {"bandwidth_fee": 1000, "energy_fee": 100, "create_fee": 1100000}
+    cc.tron_block = lambda chain: {"number": 1, "timestamp": 2, "tx_trie_root": "00" * 32, "parent_hash": "00" * 32,
+                                   "witness_address": "41" + "00" * 20, "version": 1}
+    cc.tron_account = lambda chain, a: {"balance": 7_000_000 if a == trx_main else 0, "active": a == trx_main, "bandwidth": 600, "energy": 0}
+    cc.observe = lambda chain, asset, a, n: (2_000_000 if a == trx_main else 0, 0)
+    cc.tron_token_energy = lambda *a: 65000
+    cc.tron_broadcast = lambda chain, tx: "ab" * 32
+    cc.tx_status = lambda chain, h: True
+    try:
+        r = api.get("/wallet/send/eth?asset=usdt", headers=key)
+        assert r.status_code == 400 and "`to`" in r.text, r.text  # gas depends on the destination
+        prep = api.get("/wallet/send/ETH?asset=USDT&to=0x" + "11" * 20, headers=key).json()
+        assert prep["asset"] == "USDT" and prep["main"]["address"] == eth_main and prep["sources"] == [], prep
+        assert api.get("/wallet/send/TRX?to=Tnotanaddress", headers=key).status_code == 400
+        prep = api.get(f"/wallet/send/TRX?to={to_trx}", headers=key).json()
+        assert prep["kind"] == "tron" and prep["to_active"] is False and prep["params"]["create_fee"] == 1100000, prep
+        assert prep["sources"] == [{"address": trx_main, "index": 0, "balance": "7000000", "active": True, "bandwidth": 600, "energy": 0}], prep
+        prep = api.get(f"/wallet/send/TRX?asset=USDT&to={to_trx}", headers=key).json()
+        assert [(s["address"], s["token_balance"], s["token_energy"]) for s in prep["sources"]] == [(trx_main, "2000000", 65000)], prep
+        assert api.get("/wallet/send/TRX?asset=DOGE&to=" + to_trx, headers=key).status_code == 400
+        r = api.post("/wallet/send/TRX", json={"txs": ["0a" + "00" * 20]}, headers=key).json()
+        assert r["tx_hashes"] == ["ab" * 32], r
+        assert api.get("/wallet/tx/TRX/" + "ab" * 32, headers=key).json() == {"done": True, "ok": True}
+        assert api.get("/wallet/tx/TRX/xyz", headers=key).status_code == 422
+        assert api.get("/wallet/tx/BTC/" + "ab" * 32, headers=key).status_code == 400
+    finally:
+        for n, f in real.items():
+            setattr(cc, n, f)
+
+
 def check_wallet_login():
     """Signature login (what the wallet frame does), sessions, key rotation, balances."""
     from bip_utils import Bip44, Bip44Changes, Bip44Coins
@@ -254,6 +297,7 @@ def demo():
 
     check_wallet_login()
     check_evm_send(key)
+    check_token_send(key)
 
     # --- watcher with a fake chain -----------------------------------------------------------------
     chain = {}  # address -> (seen, confirmed) in smallest units

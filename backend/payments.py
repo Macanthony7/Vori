@@ -14,7 +14,7 @@ from xpubs import address
 WINDOW = timedelta(minutes=30)        # time the customer has to send the payment
 CONFIRM_GRACE = timedelta(hours=24)   # how long a seen-but-unconfirmed payment is still watched
 REUSE_AFTER = timedelta(hours=24)     # quarantine before an unpaid address can be handed out again
-CHECK_EVERY = {"BTC": 60, "LTC": 60, "DOGE": 60, "ETH": 15, "BSC": 10, "TRX": 10, "SEPOLIA": 12}  # seconds
+CHECK_EVERY = {"BTC": 60, "LTC": 60, "DOGE": 60, "ETH": 15, "BSC": 10, "TRX": 10, "SEPOLIA": 12, "NILE": 10}  # seconds
 OPEN = ("pending", "confirming")
 EVENTS = {"confirming": "payment.confirming", "confirmed": "payment.confirmed", "expired": "payment.expired"}
 PUBLIC_URL = os.getenv("GATEWAY_PUBLIC_URL", "http://localhost:8000").rstrip("/")  # base of checkout links

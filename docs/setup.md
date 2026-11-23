@@ -52,6 +52,7 @@ fill it in. Never commit `.env`.
 | `BSC_RPC_URL` | BNB, USDT-BEP20 | e.g. `https://rpc.ankr.com/bsc/<key>` |
 | `TRONGRID_URL` | TRX, USDT-TRC20 | Default `https://api.trongrid.io` |
 | `TRONGRID_API_KEY` | TRX, USDT-TRC20 | Optional, raises the rate limit |
+| `NILE_TRONGRID_URL` | Nile | Default `https://nile.trongrid.io`. Only used with `GATEWAY_TESTNETS=1`; the TronGrid key is never sent to it. |
 | `SEPOLIA_RPC_URL` | Sepolia | Any Sepolia JSON-RPC URL, e.g. `https://ethereum-sepolia-rpc.publicnode.com`. Only used with `GATEWAY_TESTNETS=1`. |
 | `GATEWAY_TESTNETS` | all | `1` = add the Sepolia test network to payments, balances and sending. **Development only:** test coins have no value. |
 | `GATEWAY_PUBLIC_URL` | API | Public base URL, used to build `checkout_url` (default `http://localhost:8000`). Set it in production. |
@@ -85,6 +86,11 @@ The whole loop (checkout payment → balance → send) can be tried with free te
    test ETH there too.
 6. **Send:** wallet page → Sepolia → Send. Funds on the payment address and the main address are
    sent as separate transfers, each paying its own fee; the confirm screen says how many.
+
+The same switch also adds **Sepolia USDT** (Aave's faucet token: app.aave.com/faucet in testnet mode,
+contract `0xaA8E…33D0`) and the **Tron Nile testnet** (TRX and USDT from nileex.io's faucet). For
+USDT, first put some test ETH or TRX on your **main** address (Receive): it pays the gas and tops up
+payment addresses automatically. The confirm screen says how many top-ups are sent first.
 
 ## Tests
 

@@ -27,6 +27,7 @@ BSC_RPC_URL = os.getenv("BSC_RPC_URL", "")
 RPC_URLS = {"ETH": ETH_RPC_URL, "BSC": BSC_RPC_URL, "SEPOLIA": os.getenv("SEPOLIA_RPC_URL", "")}
 TRONGRID_URL = os.getenv("TRONGRID_URL", "https://api.trongrid.io").rstrip("/")
 TRONGRID_API_KEY = os.getenv("TRONGRID_API_KEY", "")
+TRON_URLS = {"TRX": TRONGRID_URL, "NILE": os.getenv("NILE_TRONGRID_URL", "https://nile.trongrid.io").rstrip("/")}
 
 
 class ChainError(RuntimeError):
@@ -39,8 +40,8 @@ def observe(chain, asset, address, confirmations):
         return _utxo(chain, address, confirmations)
     if chain in RPC_URLS:
         return _evm(RPC_URLS[chain], address, contract, confirmations)
-    if chain == "TRX":
-        return _tron(address, contract)
+    if chain in TRON_URLS:
+        return _tron(TRON_URLS[chain], address, contract)
     raise ChainError(f"unsupported chain {chain}")
 
 
@@ -209,11 +210,16 @@ def evm_broadcast(chain, tx_hex):
 # "wallet/" answers from the latest block, "walletsolidity/" from the last solidified
 # (irreversible) block, roughly 19 blocks behind: that is our confirmed view.
 
-def _tron(address, contract):
-    headers = {"TRON-PRO-API-KEY": TRONGRID_API_KEY} if TRONGRID_API_KEY else {}
+def _tron_headers(url):
+    # The key belongs to mainnet TronGrid; never send it to a testnet host.
+    return {"TRON-PRO-API-KEY": TRONGRID_API_KEY} if TRONGRID_API_KEY and url == TRONGRID_URL else {}
+
+
+def _tron(url, address, contract):
+    headers = _tron_headers(url)
     if not contract:
         seen, confirmed = (
-            int(_post(f"{TRONGRID_URL}/{api}/getaccount", {"address": address, "visible": True}, headers=headers)
+            int(_post(f"{url}/{api}/getaccount", {"address": address, "visible": True}, headers=headers)
                 .get("balance", 0))
             for api in ("wallet", "walletsolidity")
         )
@@ -223,9 +229,98 @@ def _tron(address, contract):
                "parameter": hex20.rjust(64, "0"), "visible": True}
     values = []
     for api in ("wallet", "walletsolidity"):
-        data = _post(f"{TRONGRID_URL}/{api}/triggerconstantcontract", payload, headers=headers)
+        data = _post(f"{url}/{api}/triggerconstantcontract", payload, headers=headers)
         result = (data.get("constant_result") or [None])[0]
         if result is None:
             raise ChainError(f"TRC20 balanceOf failed: {str(data)[:200]}")
         values.append(int(result, 16) if result else 0)
     return values[0], values[1]
+
+
+# --- Sending TRX / TRC20 and tokens (the wallet frame signs; these only read and relay) ------------
+
+def _tron_call(chain, path, payload=None):
+    url = TRON_URLS[chain]
+    return _post(f"{url}/wallet/{path}", payload or {}, headers=_tron_headers(url))
+
+
+def tron_block(chain):
+    """Latest block header, which a Tron transaction must reference (valid for ~18 hours)."""
+    h = _tron_call(chain, "getnowblock").get("block_header", {}).get("raw_data", {})
+    try:
+        return {"number": int(h["number"]), "timestamp": int(h["timestamp"]), "tx_trie_root": h["txTrieRoot"],
+                "parent_hash": h["parentHash"], "witness_address": h["witness_address"], "version": int(h.get("version", 0))}
+    except (KeyError, TypeError, ValueError):
+        raise ChainError("getnowblock: unexpected response") from None
+
+
+def tron_params(chain):
+    """Fees in sun: per bandwidth byte, per energy unit, and for activating a new account."""
+    params = {p["key"]: p.get("value", 0) for p in _tron_call(chain, "getchainparameters").get("chainParameter", [])}
+    try:
+        return {"bandwidth_fee": int(params["getTransactionFee"]), "energy_fee": int(params["getEnergyFee"]),
+                # 1 TRX system fee + 0.1 TRX burned for the bandwidth of an account-creating transfer
+                "create_fee": int(params["getCreateNewAccountFeeInSystemContract"]) + int(params["getCreateAccountFee"])}
+    except (KeyError, TypeError, ValueError):
+        raise ChainError("getchainparameters: unexpected response") from None
+
+
+def tron_account(chain, address):
+    """{balance (sun), active, bandwidth, energy}: an address that never received TRX isn't active yet;
+    bandwidth/energy are what it can use today without burning TRX."""
+    acct = _tron_call(chain, "getaccount", {"address": address, "visible": True})
+    res = _tron_call(chain, "getaccountresource", {"address": address, "visible": True})
+    get = lambda k: int(res.get(k, 0))
+    return {"balance": int(acct.get("balance", 0)), "active": bool(acct.get("address")),
+            "bandwidth": max(0, get("freeNetLimit") - get("freeNetUsed")) + max(0, get("NetLimit") - get("NetUsed")),
+            "energy": max(0, get("EnergyLimit") - get("EnergyUsed"))}
+
+
+def tron_token_energy(chain, contract, owner, to, amount):
+    """Energy a TRC20 transfer(to, amount) from `owner` would use (simulated, nothing is sent)."""
+    to_hex = Base58Decoder.CheckDecode(to)[1:].hex()
+    data = _tron_call(chain, "triggerconstantcontract", {
+        "owner_address": owner, "contract_address": contract, "function_selector": "transfer(address,uint256)",
+        "parameter": to_hex.rjust(64, "0") + format(amount, "064x"), "visible": True})
+    if not (data.get("result") or {}).get("result") or "energy_used" not in data:
+        raise ChainError(f"TRC20 transfer simulation failed: {str(data.get('result'))[:200]}")
+    return int(data["energy_used"])
+
+
+def tron_broadcast(chain, tx_hex):
+    """Relay a signed Transaction (protobuf, hex). Returns its id."""
+    data = _tron_call(chain, "broadcasthex", {"transaction": tx_hex})
+    if not data.get("result"):
+        msg = data.get("message", "")
+        try:
+            msg = bytes.fromhex(msg).decode()  # TronGrid hex-encodes some messages
+        except ValueError:
+            pass
+        raise ChainError(f"rejected: {data.get('code', '')} {msg}"[:300])
+    return data["txid"]
+
+
+def token_balance(chain, contract, address):
+    """ERC-20 balanceOf at the latest block."""
+    call = {"to": contract, "data": "0x70a08231" + address[2:].lower().rjust(64, "0")}
+    v = _rpc(RPC_URLS[chain], "eth_call", [call, "latest"])
+    return int(v, 16) if v not in ("0x", None) else 0
+
+
+def evm_token_gas(chain, contract, sender, to, amount):
+    """Gas an ERC-20 transfer(to, amount) from `sender` would use (eth_estimateGas, nothing is sent)."""
+    data = "0xa9059cbb" + to[2:].lower().rjust(64, "0") + format(amount, "064x")
+    return int(_rpc(RPC_URLS[chain], "eth_estimateGas", [{"from": sender, "to": contract, "data": data}]), 16)
+
+
+def tx_status(chain, tx_hash):
+    """None while pending, True once included and successful, False if included but failed."""
+    if chain in TRON_URLS:
+        info = _tron_call(chain, "gettransactioninfobyid", {"value": tx_hash})
+        if not info.get("blockNumber"):
+            return None
+        return info.get("result") != "FAILED"
+    receipt = _rpc(RPC_URLS[chain], "eth_getTransactionReceipt", [tx_hash])
+    if not receipt or not receipt.get("blockNumber"):
+        return None
+    return receipt.get("status") == "0x1"

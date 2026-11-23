@@ -315,9 +315,11 @@ Authenticated. Live balances, per chain/asset the account supports:
 
 ### `GET /wallet/send/{chain}`
 
-Authenticated. `chain`: `BTC`, `LTC`, `DOGE` (`"kind": "utxo"`), or `ETH`, `BSC`, `SEPOLIA` for their
-native coin (`"kind": "evm"`). `SEPOLIA` only with `GATEWAY_TESTNETS=1`. Others: **400**, not
-supported yet. What the wallet frame needs to plan a send. UTXO chains:
+Authenticated. `chain`: `BTC`, `LTC`, `DOGE` (`"kind": "utxo"`), `ETH`, `BSC`, `SEPOLIA`
+(`"kind": "evm"`) or `TRX`, `NILE` (`"kind": "tron"`). Query: `asset` (default: the native coin;
+`USDT` on EVM and Tron chains) and `to`, the destination, **required** for Tron and tokens because
+fees depend on it. `SEPOLIA` and `NILE` only with `GATEWAY_TESTNETS=1`. Anything else: **400**.
+What the wallet frame needs to plan a send. UTXO chains:
 
 ```json
 {
@@ -351,13 +353,40 @@ nonce. Each sends its own transfer and pays its own fee. Amounts are wei, as str
 the 10th/50th/90th percentile of the last 10 blocks (minimum 0.1 gwei), max fee = 2 × next base fee +
 tip. BSC returns `"type": "legacy"` with `gas_price` per speed. **502**: the provider couldn't be read.
 
+USDT on EVM adds `"main"` (the main address with its ETH/BNB `balance` and `nonce`; it pays gas)
+and lists as `sources` only addresses holding the token, each with `token_balance` and `token_gas`
+(`eth_estimateGas` for sending its whole balance to `to`).
+
+Tron (`TRX`, `NILE`):
+
+```json
+{
+  "chain": "NILE", "kind": "tron", "asset": "TRX",
+  "params": { "bandwidth_fee": 1000, "energy_fee": 100, "create_fee": 1100000 },
+  "block": { "number": 72971618, "timestamp": 1795457931000, "tx_trie_root": "…", "parent_hash": "…", "witness_address": "41…", "version": 40 },
+  "to_active": true,
+  "sources": [ { "address": "TUEZ…", "index": 0, "balance": "2000000", "active": true, "bandwidth": 600, "energy": 0 } ]
+}
+```
+
+Amounts in sun (1 TRX = 1,000,000). `to_active: false` means sending TRX there activates the
+address (`create_fee`). `bandwidth` / `energy`: what the address can use today without burning TRX.
+USDT adds `"main"` and, per source, `token_balance` and `token_energy` (simulated transfer).
+
 ### `POST /wallet/send/{chain}`
 
 Authenticated. `{"txs": ["0100…", …]}`: transactions signed by the wallet frame (1 to 50, hex).
-Relayed in order (BlockCypher for UTXO chains, `eth_sendRawTransaction` for EVM), stopping at the
+Relayed in order (BlockCypher for UTXO chains, `eth_sendRawTransaction` for EVM, TronGrid
+`broadcasthex` for Tron, where each is the signed `Transaction` protobuf), stopping at the
 first rejection: `{"chain": "SEPOLIA", "tx_hashes": ["0x…"], "error": null}`. If some went through
 before a rejection, `tx_hashes` lists them and `error` says which one failed and why. **502** if the
 first one is rejected (for example a fee too low). **422**: not hex.
+
+### `GET /wallet/tx/{chain}/{hash}`
+
+Authenticated; EVM and Tron chains. `{"done": true, "ok": true}` once the transaction is in a block
+and succeeded (`ok: false`: included but failed), `{"done": false}` while pending. The wallet page
+uses it to wait for gas top-ups before relaying token transfers.
 
 ## Payment statuses
 

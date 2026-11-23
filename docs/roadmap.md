@@ -27,7 +27,7 @@ Focus: **the engine first**. Revenue features wait until it's solid.
 | 2 | **Wallet vault** | Send without retyping the phrase every time | **Done** (verified in Chrome): see [security.md](security.md#wallet-vault). The phrase is encrypted with the merchant's password inside the offline frame; the page stores only the ciphertext on this device. Unlock with the password; auto-locks. |
 | 3 | **Wallet dashboard: Balance + Receive** | The merchant needs to see the money in one place | **Done:** see [api.md](api.md#wallet). Live balance per coin over the main address plus every payment address that ever received funds (no gap limit). Receive = the main address (index 0); payments start at index 1. Recent payments. Balances cached 60 s. |
 | 4 | **Dashboard login without the API key** | The API key shouldn't need to live in the browser | **Done:** the unlocked vault signs a single-use challenge with the BTC main key; the server verifies it against the stored xpub and issues a 12 h session. Also gives **API key recovery** (`POST /accounts/me/api-key`). |
-| 5 | **Send, signed on the merchant's device** | Moving funds without custody | **BTC/LTC/DOGE and native ETH/BNB done** (Sepolia test network for trying it; not yet tried with real funds): see [security.md](security.md#sending-btc-ltc-doge). Steps modeled on Gem Wallet (prepare → plan → confirm in the frame → sign → relay); signing engine Trust Wallet Core. Next: native TRX, then USDT (gas from the main address). See [Sending and gas](#sending-and-gas). **Required before launch for ETH, BSC and Tron:** other wallets don't show our payment addresses there. |
+| 5 | **Send, signed on the merchant's device** | Moving funds without custody | **Done for every asset: BTC/LTC/DOGE, native ETH/BNB/TRX, and USDT on Ethereum, BSC and Tron** with gas top-ups from the main address (Sepolia and Nile test networks for trying it; Sepolia ETH tested end to end, not yet tried with real funds): see [security.md](security.md#sending). Steps modeled on Gem Wallet (prepare → plan → confirm in the frame → sign → relay); signing engine Trust Wallet Core. See [Sending and gas](#sending-and-gas). **Required before launch for ETH, BSC and Tron:** other wallets don't show our payment addresses there. |
 | 6 | **Transaction hash on payments** | Receipts, explorer links on the checkout page, support | See [Transaction hashes](#transaction-hashes-how-the-prototype-found-them). |
 | 7 | **"Paid late" detection** | Funds arriving after `expired` are invisible today | Keep observing expired payments for 24 h and emit `payment.paid_late`. |
 | 8 | **Stop reusing addresses** | Payers never see a repeated address | Reuse exists only because other wallets stop scanning after ~20 empty addresses. Once our wallet shows every address, drop it. Keep an opt-in for merchants who spend from another wallet. |
@@ -68,8 +68,7 @@ presses Send, and the wallet picks which addresses to spend from, like any HD wa
 |---|---|---|
 | BTC, LTC, DOGE | One transaction spending as many payment addresses as needed | None: the fee comes out of the coins being sent |
 | ETH, BNB, TRX (native) | One transfer per address that holds funds | None: each address pays its own fee from its balance |
-| USDT on Ethereum, BSC | **EIP-7702:** each payment address signs an authorization on the device; the merchant's main address sends one batch transaction and pays all the gas | Only on the merchant's **main** address |
-| USDT on Tron | The main address stakes TRX and **delegates energy** to the payment addresses, the wallet sends, then reclaims the energy | Only on the main address (TRX staked for energy) |
+| USDT on Ethereum, BSC, Tron | **Gas top-up:** one confirm screen; the frame signs a small ETH/BNB/TRX transfer from the main address to each USDT address that lacks gas, plus the USDT transfers. The page relays the top-ups, waits until they land (`GET /wallet/tx`), then relays the USDT | Only on the merchant's **main** address |
 
 So for tokens, "sweeping" is a step inside Send, not a job on the server. The problem it solves:
 a fresh payment address holds USDT but no ETH/BNB/TRX, so it can't pay its own transfer fee.
@@ -78,9 +77,15 @@ a fresh payment address holds USDT but no ETH/BNB/TRX, so it can't pay its own t
 address needs its private key. A server that does that holds the keys, which is custody: the
 thing this product exists to avoid.
 
-Before building item 5 for tokens, check:
-- The exact Tron bandwidth cost for a payment address that has never sent anything.
-- Which audited EIP-7702 delegate (batch executor) contract to use on Ethereum and BSC, rather than writing our own.
+Top-ups leave a little ETH/BNB/TRX dust on payment addresses (the fee is reserved for the worst
+case). It shows in the native balance and goes out with the next native Send once it exceeds a fee.
+A Tron payment address that only ever received USDT isn't activated; its top-up activates it, which
+costs the main address 1.1 TRX once.
+
+**Later (optional): truly sponsored token sends.** EIP-7702 on ETH/BSC (needs an audited delegate
+contract plus a relayer or bundler) and Tron energy delegation (needs TRX staked on the main
+address). Saves the dust and the wait; chosen against for now as several times the work to build
+and audit.
 
 **Tell merchants:** if they import the same phrase into another wallet (Trust Wallet, Electrum),
 that wallet may not show funds past its ~20-address scan limit. The money is safe; our wallet
