@@ -3,10 +3,13 @@
 <head>
     <meta charset="utf-8">
     <!-- SOURCE file. Build public/derive.html with `python build_frame.py` (in frontend/); never edit the output.
-         The recovery phrase only ever exists in this document. It runs in a sandboxed iframe
+         The recovery phrase only ever exists in this document (in plain text; the page stores only
+         the password-encrypted vault this document produces). It runs in a sandboxed iframe
          (opaque origin), loads no files, and its policy forbids every network request.
-         Only the inlined script/style blocks, pinned by SHA-256, may run. See docs/security.md. -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src {{SCRIPT_HASH}}; style-src {{STYLE_HASH}}; connect-src 'none'; form-action 'none'; base-uri 'none'">
+         Only the inlined script/style blocks, pinned by SHA-256, may run. The signing engine is handed
+         over by the parent page and run from blob: URLs only after its SHA-256 matches the values
+         pinned inside this script ('wasm-unsafe-eval' lets it start its WebAssembly). See docs/security.md. -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src {{SCRIPT_HASH}} blob: 'wasm-unsafe-eval'; style-src {{STYLE_HASH}}; connect-src 'none'; form-action 'none'; base-uri 'none'">
     <meta name="referrer" content="no-referrer">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Recovery phrase</title>
@@ -29,7 +32,7 @@
         <p class="error" id="c-error" role="alert"></p>
         <div class="actions">
             <button type="button" id="c-back" class="secondary">Show phrase again</button>
-            <button type="button" id="c-done">Create account</button>
+            <button type="button" id="c-done">Continue</button>
         </div>
     </div>
 </section>
@@ -48,12 +51,59 @@
         <p class="hint">Account 1 keeps payments apart from your wallet's main account 0. Most mobile wallets only show account 0, so check payments in your dashboard.</p>
     </details>
     <p class="error" id="i-error" role="alert"></p>
-    <button type="button" id="i-done">Create account</button>
+    <button type="button" id="i-done">Continue</button>
+</section>
+
+<section id="password" hidden>
+    <h2>Choose a password</h2>
+    <p>It unlocks your wallet on this device, so you don't need your recovery phrase every time. Your phrase is encrypted with it and never leaves this device.</p>
+    <label for="p-new">Password (at least 8 characters)</label>
+    <input id="p-new" type="password" autocomplete="new-password">
+    <label for="p-again">Repeat password</label>
+    <input id="p-again" type="password" autocomplete="new-password">
+    <p class="hint">Nobody can reset it, including us. If you forget it, restore the wallet with your recovery phrase. A few random words make a strong password.</p>
+    <p class="error" id="p-error" role="alert"></p>
+    <button type="button" id="p-done">Encrypt and create account</button>
+</section>
+
+<section id="unlock" hidden>
+    <h2>Unlock your wallet</h2>
+    <label for="u-pass">Password</label>
+    <input id="u-pass" type="password" autocomplete="current-password">
+    <p class="error" id="u-error" role="alert"></p>
+    <button type="button" id="u-done">Unlock</button>
+</section>
+
+<section id="unlocked" hidden>
+    <h2>Wallet unlocked</h2>
+    <p>Your keys are open in this window only. It locks itself after 15 minutes, or when you lock it or close the page.</p>
+</section>
+
+<section id="confirm" hidden>
+    <h2>Confirm sending</h2>
+    <p>Check every detail. This window is offline and shows exactly what will be signed.</p>
+    <dl class="addresses">
+        <dt>Amount</dt><dd id="cf-amount"></dd>
+        <dt>To</dt><dd id="cf-to"></dd>
+        <dt>Network fee</dt><dd id="cf-fee"></dd>
+        <dt>Total leaving your wallet</dt><dd id="cf-total"></dd>
+    </dl>
+    <p class="warning">Crypto sent to a wrong address can't be recovered, by anyone.</p>
+    <div class="actions">
+        <button type="button" id="cf-cancel" class="secondary">Cancel</button>
+        <button type="button" id="cf-ok">Confirm and send</button>
+    </div>
+</section>
+
+<section id="working" hidden>
+    <p id="working-text" role="status"></p>
+    <p class="error" id="working-error" role="alert"></p>
+    <button type="button" id="working-back" class="secondary" hidden>Back</button>
 </section>
 
 <section id="done" hidden>
-    <h2>Keys derived</h2>
-    <p>Your recovery phrase has been cleared from this page. Only the public keys were handed over.</p>
+    <h2>Wallet encrypted</h2>
+    <p>Your recovery phrase is encrypted with your password and cleared from this page. Only the public keys were handed over.</p>
 </section>
 
 <script>{{SCRIPT}}</script>

@@ -9,6 +9,7 @@ or public/styles.css:
 """
 import base64
 import hashlib
+import json
 from pathlib import Path
 
 HERE = Path(__file__).parent
@@ -24,6 +25,13 @@ def csp_hash(text):
 
 def build():
     script = "\n;\n".join((FRAME / name).read_text(encoding="utf-8") for name in SCRIPTS)
+    # Pin the lazily loaded signing engine: derive.js refuses any file whose SHA-256 differs.
+    sums = {}
+    for line in (HERE / "public" / "vendor" / "wallet-core" / "SHA256SUMS").read_text(encoding="utf-8").splitlines():
+        digest, name = line.split(maxsplit=1)
+        sums[name.lstrip("*")] = digest
+    assert script.count("__ENGINE_SHA256__") == 1, "derive.js must contain __ENGINE_SHA256__ exactly once"
+    script = script.replace("__ENGINE_SHA256__", json.dumps(sums, sort_keys=True))
     styles = (HERE / "public" / "styles.css").read_text(encoding="utf-8")
     assert "</script" not in script.lower(), "a script contains </script>; inlining would break the page"
 

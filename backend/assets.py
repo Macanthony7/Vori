@@ -2,7 +2,13 @@
 
 Docs: docs/api.md#assets
 """
+import os
 from decimal import Decimal, InvalidOperation
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).parent / ".env")  # some modules import assets before db
 
 # (chain, asset) -> settings. `xpub` = which registered xpub the address comes from.
 # Confirmations are the common industry defaults. TRX counts as confirmed once the block is
@@ -19,6 +25,15 @@ ASSETS = {
     ("TRX", "TRX"):   dict(xpub="TRX",  decimals=6,  confirmations=20, contract=None),
     ("TRX", "USDT"):  dict(xpub="TRX",  decimals=6,  confirmations=20, contract="TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t"),
 }
+
+# Test networks, only with GATEWAY_TESTNETS=1 (never in production): test coins have no value.
+TESTNETS = os.getenv("GATEWAY_TESTNETS") == "1"
+if TESTNETS:
+    ASSETS[("SEPOLIA", "ETH")] = dict(xpub="ETH", decimals=18, confirmations=3, contract=None)
+
+# EVM chains: chain id used when signing (EIP-155 replay protection) and the native asset.
+EVM_CHAINS = {"ETH": dict(chain_id=1, native="ETH"), "BSC": dict(chain_id=56, native="BNB"),
+              "SEPOLIA": dict(chain_id=11155111, native="ETH")}
 
 MAX_UNITS = 10**15  # cap per payment, in whole coins/tokens
 

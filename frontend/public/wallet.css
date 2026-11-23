@@ -1,0 +1,55 @@
+/* Wallet page only. Kept out of styles.css, which is hash-pinned inside the seed frame. */
+.wallet-head, .section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.section-head { margin: 24px 0 8px; }
+.section-head h2 { margin: 0; }
+.wallet-head button { margin-top: 0; }
+.section-head button.link { margin: 0; }
+
+.balances { list-style: none; padding: 0; margin: 8px 0; display: grid; gap: 8px; }
+.balances li {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    row-gap: 8px;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 14px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+}
+.balances .asset { font-weight: 600; }
+.balances .network { color: var(--muted); font-size: 0.94rem; }
+.balances .amount { font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; word-break: break-all; }
+.balances button { margin: 0; padding: 6px 12px; }
+
+.receive {
+    margin: 16px 0;
+    padding: 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+}
+.receive h2 { margin: 0; }
+.qr { display: flex; justify-content: center; margin: 12px 0; }
+.qr canvas { box-sizing: content-box; padding: 10px; background: #fff; border-radius: 8px; }
+#receive-address { resize: none; word-break: break-all; }
+
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 0.94rem; }
+th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--border); }
+th { color: var(--muted); font-weight: 600; }
+td.num { font-variant-numeric: tabular-nums; }
+
+select {
+    width: 100%;
+    padding: 10px 12px;
+    font: inherit;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+.balances .actions-cell { display: flex; gap: 8px; }
+.status-good { padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); word-break: break-all; }
+
+#charge-result { overflow-wrap: anywhere; }

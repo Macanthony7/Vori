@@ -6,3 +6,4 @@ frontend/frame/**               -text
 xpub_tool/dist/**               -text
 *.sha256                        -text
 SHA256SUMS                      -text
+frontend/public/vendor/**        -text

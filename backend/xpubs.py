@@ -59,7 +59,16 @@ def normalize(chain, key):
 
 def address(chain, xpub, index):
     """Receive address m/44'/coin'/account'/0/index from a normalized account xpub."""
+    return _child(chain, xpub, index).ToAddress()
+
+
+def public_key(chain, xpub, index):
+    """Compressed secp256k1 public key (33 bytes) of m/44'/coin'/account'/0/index."""
+    return _child(chain, xpub, index).RawCompressed().ToBytes()
+
+
+def _child(chain, xpub, index):
     if not 0 <= index < 0x80000000:
         raise XpubError("address index out of range")
     acct = Bip44.FromExtendedKey(xpub, CHAINS[chain])
-    return acct.Change(Bip44Changes.CHAIN_EXT).AddressIndex(index).PublicKey().ToAddress()
+    return acct.Change(Bip44Changes.CHAIN_EXT).AddressIndex(index).PublicKey()

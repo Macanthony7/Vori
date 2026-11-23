@@ -24,6 +24,8 @@ import webhooks  # noqa: E402
 from assets import AmountError, from_units, to_units  # noqa: E402
 from chain_client import ChainError  # noqa: E402
 from test_xpubs import CASES  # noqa: E402
+from xpubs import address  # noqa: E402
+import app as app_module  # noqa: E402
 from app import app  # noqa: E402
 
 api = TestClient(app)
@@ -78,6 +80,121 @@ def check_webhook_urls():
     assert not webhooks.verify("s3cret", '{"a":1}', sig, now=1_700_000_000 + 900)  # too old
 
 
+def check_evm_send(key):
+    """Native ETH send: every funded wallet address is a source with its own nonce; several signed
+    transfers are relayed in order and a rejection part-way is reported, not hidden."""
+    cc = app_module.chain_client
+    real = (cc.evm_account, cc.evm_fees, cc.evm_broadcast)
+    main = address("ETH", CASES["ETH"][0], 0)
+    cc.evm_account = lambda chain, addr: (10**18, 4) if addr == main else (0, 0)
+    cc.evm_fees = lambda chain: {"type": "eip1559", "normal": {"max_fee_per_gas": "30", "max_priority_fee_per_gas": "2"}}
+    sent = []
+
+    def relay(chain, tx):
+        if tx == "ff" * 20:
+            raise ChainError("nonce too low")
+        sent.append(tx)
+        return "0x" + str(len(sent)) * 64
+    cc.evm_broadcast = relay
+    try:
+        prep = api.get("/wallet/send/eth", headers=key).json()
+        assert prep["kind"] == "evm" and prep["chain_id"] == 1 and prep["gas_limit"] == 21000, prep
+        assert prep["sources"] == [{"address": main, "index": 0, "balance": str(10**18), "nonce": 4}], prep  # empty addresses left out
+        assert api.get("/wallet/send/bsc", headers=key).json()["chain_id"] == 56
+        r = api.post("/wallet/send/ETH", json={"txs": ["0x" + "02" * 40, "ff" * 20, "03" * 40]}, headers=key).json()
+        assert r["tx_hashes"] == ["0x" + "1" * 64] and "transaction 2 of 3" in r["error"] and sent == ["02" * 40], r
+    finally:
+        cc.evm_account, cc.evm_fees, cc.evm_broadcast = real
+
+
+def check_wallet_login():
+    """Signature login (what the wallet frame does), sessions, key rotation, balances."""
+    from bip_utils import Bip44, Bip44Changes, Bip44Coins
+    from coincurve import PrivateKey
+
+    acct = Bip44.FromSeed(os.urandom(64), Bip44Coins.BITCOIN).Purpose().Coin().Account(0)
+    xpub = acct.PublicKey().ToExtended()
+    main_key = PrivateKey(acct.Change(Bip44Changes.CHAIN_EXT).AddressIndex(0).PrivateKey().Raw().ToBytes())
+    r = api.post("/accounts", json={"xpubs": {"BTC": xpub}})
+    assert r.status_code == 201, r.text
+    old_key = {"Authorization": "Bearer " + r.json()["api_key"]}
+
+    def sign(challenge, key=main_key):
+        return key.sign((app_module.LOGIN_PREFIX + challenge).encode()).hex()  # DER over sha256, like bitcoinjs
+
+    c = api.post("/auth/challenge").json()["challenge"]
+    assert api.post("/auth/login", json={"xpub": xpub, "challenge": c, "signature": sign(c, PrivateKey())}).status_code == 401
+    assert api.post("/auth/login", json={"xpub": xpub, "challenge": c, "signature": sign(c)}).status_code == 401, "challenge is single use"
+    c = api.post("/auth/challenge").json()["challenge"]
+    r = api.post("/auth/login", json={"xpub": xpub, "challenge": c, "signature": sign(c)})
+    assert r.status_code == 200 and r.json()["token"].startswith("gws_"), r.text
+    assert "no-store" in r.headers["cache-control"]
+    sess = {"Authorization": "Bearer " + r.json()["token"]}
+    assert api.get("/accounts/me", headers=sess).json()["chains"]["BTC"]["first_address"] == address("BTC", xpub, 0)
+    assert api.post("/auth/login", json={"xpub": CASES["BTC"][0] + "x", "challenge": "nope", "signature": "00"}).status_code == 401
+
+    # Key recovery: a session can replace the API key; the old key stops working.
+    new_key = {"Authorization": "Bearer " + api.post("/accounts/me/api-key", headers=sess).json()["api_key"]}
+    assert api.get("/accounts/me", headers=old_key).status_code == 401
+    assert api.get("/accounts/me", headers=new_key).status_code == 200
+
+    # Balances: main address always counted, plus funded payment addresses; failures marked incomplete.
+    pay = api.post("/payments", json={"chain": "BTC", "asset": "BTC", "amount": "0.01"}, headers=sess).json()
+    with closing(db.connect()) as conn, conn:
+        conn.execute("UPDATE payments SET received = '1000000' WHERE id = ?", (pay["id"],))
+    fake = {address("BTC", xpub, 0): 50_000, pay["address"]: 1_000_000}
+    real_balance, app_module.chain_client.balance = app_module.chain_client.balance, lambda c, a, addr: fake[addr]
+    try:
+        b = api.get("/wallet/balances", headers=sess).json()["balances"]
+        assert len(b) == 1 and b[0]["balance"] == "0.0105" and b[0]["complete"], b
+        assert b[0]["main_address"] == address("BTC", xpub, 0) and len(b[0]["addresses"]) == 2, b
+        app_module._balance_cache.clear()
+
+        def flaky(c, a, addr):
+            if addr == pay["address"]:
+                raise ChainError("down")
+            return fake[addr]
+        app_module.chain_client.balance = flaky
+        b = api.get("/wallet/balances", headers=sess).json()["balances"]
+        assert b[0]["balance"] == "0.0005" and not b[0]["complete"], b
+    finally:
+        app_module.chain_client.balance = real_balance
+        app_module._balance_cache.clear()
+
+    # Send: the server lists spendable coins of every wallet address and relays the signed tx.
+    cc = app_module.chain_client
+    real = (cc.unspent, cc.fee_rates, cc.broadcast)
+    relayed = []
+    coins = {address("BTC", xpub, 0): [{"tx_hash": "aa" * 32, "vout": 1, "value": 5000, "confirmations": 3}],
+             pay["address"]: [{"tx_hash": "bb" * 32, "vout": 0, "value": 1_000_000, "confirmations": 7}]}
+    cc.unspent = lambda chain, addr: coins.get(addr, [])
+    cc.fee_rates = lambda chain: {"slow": 2, "normal": 5, "fast": 12}
+    cc.broadcast = lambda chain, tx: relayed.append((chain, tx)) or "cc" * 32
+    try:
+        r = api.get("/wallet/send/btc", headers=sess)
+        prep = r.json()
+        assert r.status_code == 200 and prep["fee_per_byte"]["normal"] == 5 and prep["change_index"] == 0, r.text
+        assert sorted((u["index"], u["value"]) for u in prep["utxos"]) == [(0, 5000), (1, 1_000_000)], prep
+        assert all(u["address"] == address("BTC", xpub, u["index"]) for u in prep["utxos"])
+        assert api.get("/wallet/send/TRX", headers=sess).status_code == 400  # not supported yet
+        assert api.get("/wallet/send/LTC", headers=sess).status_code == 400  # no LTC xpub
+        assert api.post("/wallet/send/BTC", json={"txs": ["zz" * 20]}, headers=sess).status_code == 422
+        r = api.post("/wallet/send/BTC", json={"txs": ["01" * 100]}, headers=sess)
+        assert r.status_code == 200 and r.json()["tx_hashes"] == ["cc" * 32] and relayed == [("BTC", "01" * 100)], r.text
+
+        def reject(chain, tx):
+            raise ChainError("rejected: insufficient priority")
+        cc.broadcast = reject
+        r = api.post("/wallet/send/BTC", json={"txs": ["01" * 100]}, headers=sess)
+        assert r.status_code == 502 and "insufficient priority" in r.text, r.text
+        assert api.get("/wallet/send/BTC").status_code == 401
+    finally:
+        cc.unspent, cc.fee_rates, cc.broadcast = real
+
+    assert api.delete("/auth/session", headers=sess).status_code == 204
+    assert api.get("/accounts/me", headers=sess).status_code == 401, "logged out"
+
+
 def demo():
     check_amounts()
     check_webhook_urls()
@@ -97,14 +214,16 @@ def demo():
     secret = r.json()["secret"]
 
     btc = api.post("/payments", json={"chain": "BTC", "asset": "BTC", "amount": "0.001", "reference": "order-1"}, headers=key).json()
-    assert btc["status"] == "pending" and btc["address"] == CASES["BTC"][1] and btc["amount"] == "0.001", btc
+    # Index 0 is the main address (Receive / gas); payments start at index 1.
+    assert btc["status"] == "pending" and btc["address"] == address("BTC", CASES["BTC"][0], 1) and btc["amount"] == "0.001", btc
+    assert btc["address"] != CASES["BTC"][1]
     assert btc["confirmations_required"] == 2 and btc["reference"] == "order-1"
     btc2 = api.post("/payments", json={"chain": "btc", "asset": "btc", "amount": "1"}, headers=key).json()
     assert btc2["address"] != btc["address"], "second payment must get a new address"
     bsc = api.post("/payments", json={"chain": "BSC", "asset": "USDT", "amount": "25"}, headers=key).json()
-    assert bsc["address"] == CASES["ETH"][1] and bsc["token_contract"].startswith("0x55d398"), bsc  # ETH xpub, index 0
+    assert bsc["address"] == address("ETH", CASES["ETH"][0], 1) and bsc["token_contract"].startswith("0x55d398"), bsc
     trx = api.post("/payments", json={"chain": "TRX", "asset": "USDT", "amount": "10.5"}, headers=key).json()
-    assert trx["address"] == CASES["TRX"][1], trx
+    assert trx["address"] == address("TRX", CASES["TRX"][0], 1), trx
 
     expect = [
         ({"chain": "LTC", "asset": "LTC", "amount": "1"}, key, 400, "no LTC xpub"),
@@ -132,6 +251,9 @@ def demo():
     assert api.get("/pay/pay_doesnotexist/status").status_code == 404
     r = api.get(f"/pay/{trx['id']}")
     assert r.status_code == 200 and "/pay.js" in r.text, r.status_code
+
+    check_wallet_login()
+    check_evm_send(key)
 
     # --- watcher with a fake chain -----------------------------------------------------------------
     chain = {}  # address -> (seen, confirmed) in smallest units

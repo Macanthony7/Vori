@@ -66,6 +66,15 @@ CREATE TABLE IF NOT EXISTS webhook_events (
     last_error      TEXT
 );
 CREATE INDEX IF NOT EXISTS webhook_due ON webhook_events(next_attempt_at);
+CREATE TABLE IF NOT EXISTS login_challenges (
+    nonce       TEXT PRIMARY KEY,              -- single use; deleted when used
+    expires_at  TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS sessions (
+    token_hash  TEXT PRIMARY KEY,              -- sha256 of the "gws_..." token
+    account_id  INTEGER NOT NULL REFERENCES accounts(id),
+    expires_at  TEXT NOT NULL
+);
 """
 
 # Columns added after 0.1.0; CREATE TABLE IF NOT EXISTS won't add them to an existing database.

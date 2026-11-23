@@ -45,8 +45,12 @@ backend/
 | Payments: `POST /payments`, `GET /payments[/{id}]`, 30-min window, address reuse for the gap limit | Built and tested |
 | Watcher: detection with standard confirmations, native coins + USDT; cron mode with a single-instance lock | Built; logic tested with a fake chain, providers checked live (read-only) |
 | Signed webhooks with retries | Built and tested |
+| Wallet vault: password-encrypted phrase on the device, unlock / auto-lock (`wallet.html`) | Built; logic tested, verified in Chrome |
 | Checkout page `/pay/{id}` with QR, countdown and live status | Built; API tested, page checked in the preview browser (desktop + mobile) |
-| Wallet dashboard (balance, receive, send signed on device), transaction hashes, paid-late, rate limiting, API key recovery | Planned, see [docs/roadmap.md](docs/roadmap.md) |
+| Wallet dashboard: live balances, Receive, recent payments, sign-in by signature, API key recovery | Built and tested; checked in the preview browser (signatures from the real frame code verified by the server) |
+| Send BTC / LTC / DOGE, signed in the offline frame (Trust Wallet Core) | Built and tested; signatures verified independently; not yet tried with real funds or inside Chrome's sandboxed frame |
+| Send native ETH / BNB, plus the Sepolia test network (`GATEWAY_TESTNETS=1`) | Built and tested; Sepolia transfer signed in the browser and verified independently; not yet broadcast |
+| Send TRX / USDT, transaction hashes, paid-late, rate limiting | Planned, see [docs/roadmap.md](docs/roadmap.md) |
 | Free-tier limits, paid plans | Later |
 
 ## Quick start (development)

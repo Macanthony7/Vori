@@ -52,6 +52,8 @@ fill it in. Never commit `.env`.
 | `BSC_RPC_URL` | BNB, USDT-BEP20 | e.g. `https://rpc.ankr.com/bsc/<key>` |
 | `TRONGRID_URL` | TRX, USDT-TRC20 | Default `https://api.trongrid.io` |
 | `TRONGRID_API_KEY` | TRX, USDT-TRC20 | Optional, raises the rate limit |
+| `SEPOLIA_RPC_URL` | Sepolia | Any Sepolia JSON-RPC URL, e.g. `https://ethereum-sepolia-rpc.publicnode.com`. Only used with `GATEWAY_TESTNETS=1`. |
+| `GATEWAY_TESTNETS` | all | `1` = add the Sepolia test network to payments, balances and sending. **Development only:** test coins have no value. |
 | `GATEWAY_PUBLIC_URL` | API | Public base URL, used to build `checkout_url` (default `http://localhost:8000`). Set it in production. |
 | `GATEWAY_DB` | all | SQLite path (default `backend/gateway.db`) |
 | `GATEWAY_ALLOW_PRIVATE_WEBHOOKS` | webhooks | `1` = allow `http://` and private/loopback webhook URLs. **Development only.** |
@@ -63,6 +65,26 @@ Every normal full node and the big providers do. Pruned "light" endpoints may no
 `ALCHEMY_API_KEY` becomes `ETH_RPC_URL=https://eth-mainnet.g.alchemy.com/v2/<key>`.
 `ANKR_API_KEY` becomes `BSC_RPC_URL=https://rpc.ankr.com/bsc/<key>`. `TRONGRID_API_KEY` stays the
 same. The old `AEGIS_SEED_PHRASE` and `MAIN_WALLET_*` are **not** used and must not be copied.
+
+## Testing with Sepolia (test ETH)
+
+The whole loop (checkout payment → balance → send) can be tried with free test ETH.
+
+1. In `backend/.env`: `GATEWAY_TESTNETS=1` and `SEPOLIA_RPC_URL=…` (see `.env.example`). Restart the API.
+2. Run the watcher in a terminal (`cd backend`, `python watcher.py`). Without it, payments are never detected.
+3. Get test ETH from a Sepolia faucet into any wallet you control (MetaMask on Sepolia works).
+4. **Create a payment:** wallet page → "New payment (checkout page)" → amount, "ETH on Sepolia" →
+   Create checkout → Open the checkout page. Each payment gets a fresh address. Or with your API key:
+   ```powershell
+   $h = @{ Authorization = "Bearer gw_YOUR_KEY" }
+   Invoke-RestMethod -Method Post http://localhost:8001/payments -Headers $h -ContentType "application/json" -Body '{"chain":"SEPOLIA","asset":"ETH","amount":"0.001"}'
+   ```
+   Open the returned `checkout_url` and pay it from your faucet wallet. With 3 confirmations
+   (about 40 s) the page turns to "Paid".
+5. **Gas for later:** on the wallet page, Receive → Sepolia shows your main address. Send a little
+   test ETH there too.
+6. **Send:** wallet page → Sepolia → Send. Funds on the payment address and the main address are
+   sent as separate transfers, each paying its own fee; the confirm screen says how many.
 
 ## Tests
 
@@ -119,6 +141,13 @@ and the browser refuses to run the frame's script.
 1. Take the files from a tagged release of `iancoleman/bip39` (`src/js/`).
 2. Replace them in `frontend/frame/vendor/` and regenerate `frontend/frame/vendor/SHA256SUMS`.
 3. Run `python build_frame.py` in `frontend/`, then repeat the browser checks above.
+
+## Updating the signing engine
+
+`frontend/public/vendor/wallet-core/` holds Trust Wallet Core's browser build, unmodified. Its
+`NOTICE.md` has the versions, the npm integrity hashes and the update steps. After replacing the
+files, regenerate `SHA256SUMS` and rebuild the frame (`python build_frame.py`): the frame refuses
+any engine file whose hash isn't the pinned one.
 
 ## Offline tool
 

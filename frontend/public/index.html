@@ -16,6 +16,7 @@
     </header>
 
     <section id="choose">
+        <p id="existing" class="warning" hidden>A wallet is already saved on this device. <a href="wallet.html">Open your wallet</a>. Creating or importing another one here replaces it on this device, so make sure you have its recovery phrase.</p>
         <h2>Set up your account</h2>
         <div class="options">
             <button type="button" class="option" data-mode="create">
@@ -42,8 +43,16 @@
 
     <p class="error" id="error" role="alert" hidden></p>
 
+    <section id="restored" hidden>
+        <h2>Wallet restored on this device</h2>
+        <p>This wallet already has an account with us. Its encrypted copy is now saved on this device too.</p>
+        <p><a href="wallet.html">Open your wallet</a></p>
+    </section>
+
     <section id="result" hidden>
         <h2>Your account is ready</h2>
+        <p id="vault-saved" hidden>Your wallet is saved on this device, encrypted with your password. <a href="wallet.html">Open your wallet</a></p>
+        <p id="vault-failed" class="warning" hidden>This browser didn't let us save the wallet on this device (private mode?). Payments still work, but you'll need your recovery phrase to use the wallet here.</p>
         <label for="api-key">API key</label>
         <div class="copy-row">
             <input id="api-key" readonly>

@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-src 'self'; form-action 'none'; base-uri 'none'">
+    <meta name="referrer" content="no-referrer">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Your wallet</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="wallet.css">
+</head>
+<body>
+<main>
+    <header class="wallet-head">
+        <h1>Your wallet</h1>
+        <button type="button" id="lock" class="secondary" hidden>Lock</button>
+    </header>
+
+    <section id="none" hidden>
+        <p>No wallet is saved on this device.</p>
+        <p><a href="./">Create a wallet, or restore one with your recovery phrase</a></p>
+    </section>
+
+    <section id="vault" hidden>
+        <p id="frame-status" class="note" role="status">Loading the secure wallet window…</p>
+        <!-- Same offline, sandboxed frame as signup. The password and the unlocked keys stay inside it.
+             It stays loaded (hidden) while the dashboard is open: it holds the keys for signing. -->
+        <iframe id="frame" sandbox="allow-scripts" title="Wallet unlock, isolated and offline"></iframe>
+
+        <details id="forget-box">
+            <summary>Remove this wallet from this device</summary>
+            <p class="warning">Your funds stay safe on the blockchain. To use the wallet here again, you'll need your recovery phrase.</p>
+            <button type="button" id="forget" class="secondary">Remove from this device</button>
+        </details>
+    </section>
+
+    <section id="dashboard" hidden>
+        <p id="signing-in" class="note" role="status">Signing in…</p>
+
+        <div id="content" hidden>
+            <div class="section-head">
+                <h2>Balances</h2>
+                <button type="button" id="refresh" class="link">Refresh</button>
+            </div>
+            <ul id="balances" class="balances"></ul>
+            <p id="balances-note" class="note" hidden>Some networks couldn't be checked right now, so those balances may be higher. Try Refresh in a minute.</p>
+
+            <section id="receive" class="receive" hidden aria-labelledby="receive-title">
+                <div class="section-head">
+                    <h2 id="receive-title">Receive</h2>
+                    <button type="button" id="receive-close" class="link">Close</button>
+                </div>
+                <p>Your main address on <strong id="receive-network"></strong>. Also where gas for sending goes.</p>
+                <div id="receive-qr" class="qr" aria-hidden="true"></div>
+                <div class="copy-row">
+                    <textarea id="receive-address" rows="2" readonly spellcheck="false"></textarea>
+                    <button type="button" id="receive-copy">Copy</button>
+                </div>
+                <p id="receive-warning" class="warning"></p>
+            </section>
+
+            <section id="send" class="receive" hidden aria-labelledby="send-title">
+                <div class="section-head">
+                    <h2 id="send-title">Send</h2>
+                    <button type="button" id="send-close" class="link">Close</button>
+                </div>
+                <p>From your whole <strong id="send-network"></strong> balance. You'll check everything in the secure window before anything is signed.</p>
+                <label for="send-to">To address</label>
+                <input id="send-to" autocomplete="off" spellcheck="false" autocapitalize="off">
+                <label for="send-amount">Amount</label>
+                <input id="send-amount" inputmode="decimal" autocomplete="off">
+                <label class="check"><input type="checkbox" id="send-max"> Send everything (the fee comes out of it)</label>
+                <label for="send-speed">Network fee</label>
+                <select id="send-speed">
+                    <option value="slow">Slow (cheapest)</option>
+                    <option value="normal" selected>Normal</option>
+                    <option value="fast">Fast</option>
+                </select>
+                <p class="error" id="send-error" role="alert"></p>
+                <button type="button" id="send-review">Review</button>
+            </section>
+
+            <p id="send-result" class="status-good" role="status" hidden></p>
+
+            <details id="charge">
+                <summary>New payment (checkout page)</summary>
+                <p>Make a payment request and open its checkout page, like your shop would with the API. Each one gets a fresh address.</p>
+                <label for="charge-amount">Amount</label>
+                <input id="charge-amount" inputmode="decimal" autocomplete="off">
+                <label for="charge-network">Coin and network</label>
+                <select id="charge-network"></select>
+                <p class="error" id="charge-error" role="alert"></p>
+                <button type="button" id="charge-create">Create checkout</button>
+                <p id="charge-result" class="status-good" role="status" hidden></p>
+            </details>
+
+            <h2>Recent payments</h2>
+            <p id="payments-empty" class="note" hidden>No payments yet.</p>
+            <div class="table-wrap">
+                <table id="payments" hidden>
+                    <thead><tr><th>Created</th><th>Amount</th><th>Status</th></tr></thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+
+            <details>
+                <summary>API key</summary>
+                <p>Your shop uses an API key to create payments. Lost it? Make a new one: the old key stops working immediately.</p>
+                <button type="button" id="new-key" class="secondary">Make a new API key</button>
+                <div id="new-key-box" hidden>
+                    <div class="copy-row">
+                        <input id="new-key-value" readonly>
+                        <button type="button" id="new-key-copy">Copy</button>
+                    </div>
+                    <p class="warning">Save it now and update your shop. It's shown only once.</p>
+                </div>
+            </details>
+        </div>
+    </section>
+
+    <p class="error" id="error" role="alert" hidden></p>
+</main>
+<script src="vendor/kjua.js"></script>
+<script src="wallet.js"></script>
+</body>
+</html>

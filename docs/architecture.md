@@ -39,19 +39,55 @@ sequenceDiagram
     P->>F: load derive.html#create or #import
     F->>U: show 12 new words / ask for phrase
     U->>F: confirm 3 words / paste phrase
-    F->>F: BIP39 seed → m/44'/coin'/account' xpubs
-    F->>F: wipe phrase from the page
-    F->>P: postMessage {type: "xpubs", xpubs, account}
+    U->>F: choose a password
+    F->>F: BIP39 seed → m/44'/coin'/account' xpubs; encrypt phrase → vault
+    F->>F: wipe phrase and password from the page
+    F->>P: postMessage {type: "xpubs", xpubs, account, vault}
     P->>S: POST /accounts {xpubs}
     S->>S: validate + normalize, store, hash API key
-    S->>P: 201 {api_key, chains: {first_address}}
-    P->>P: unload the frame, show key + first addresses
+    S->>P: 201 {api_key, chains: {first_address}} (409 = already registered: same wallet, new device)
+    P->>P: unload the frame, save vault in localStorage, show key + first addresses
 ```
 
 - New wallets derive **account 0**: the wallet is dedicated to payments, so using the account every wallet shows is simplest.
 - Imported phrases default to **account 1** (changeable under "Advanced") so payments stay separate from the wallet's everyday account 0. An optional BIP39 passphrase is supported.
 - The frame resizes itself via `postMessage({type: "height"})` and reports load failures via `{type: "frame-error"}`.
 - **Blocked-frame fallback:** the parent shows "Loading the secure phrase window…" until the frame's first message. If nothing arrives within 12 s, the browser blocked sandboxed scripts: the parent hides the frame and tells the user to switch browsers or use xpub keys. Known case: the Claude desktop app's preview browser, which never runs scripts in sandboxed iframes. Verified working in Chrome.
+
+### Wallet unlock (`wallet.html`)
+
+`wallet.js` reads the saved vault from `localStorage["wallet.vault.v1"]`, loads
+`derive.html#unlock`, answers the frame's `ready` with the vault, and the frame asks for the
+password. The unlocked keys stay in the frame (for signing Send, coming next). Lock = reload the
+frame. Details and risks: [security.md](security.md#wallet-vault).
+
+After unlock the page signs in without an API key: it asks the server for a challenge, the frame
+signs it with the BTC main key, and `POST /auth/login` returns a session token kept in page memory.
+The dashboard then shows live balances (`GET /wallet/balances`), Receive (the main address with a
+QR code), recent payments, and "Make a new API key". Lock (button or the frame's 15-minute
+auto-lock) ends the session and reloads the frame. See [api.md](api.md#wallet).
+
+Merchants who signed up with xpub keys have no vault: their keys are in their own wallet.
+
+### Send (`wallet.html`, BTC / LTC / DOGE)
+
+```mermaid
+sequenceDiagram
+    participant P as wallet.js (online)
+    participant F as derive.html (offline, unlocked)
+    participant S as Server
+    P->>S: GET /wallet/send/BTC
+    S->>P: coins of every wallet address + fee rates
+    P->>F: sign-send {to, amount, fee rate, coins}
+    F->>P: engine-request (first time only)
+    P->>F: engine files (frame checks SHA-256)
+    F->>F: re-derive every listed address, plan, show confirm screen
+    F->>P: send-signed {tx_hex} (after the merchant confirms)
+    P->>S: POST /wallet/send/BTC {tx_hex}
+    S->>P: {tx_hash} → explorer link
+```
+
+Details and checks: [security.md](security.md#sending-btc-ltc-doge).
 
 ### Use xpub keys
 
@@ -90,7 +126,7 @@ sequenceDiagram
 Inside one `BEGIN IMMEDIATE` transaction, so two requests can't take the same new index:
 
 1. Look for a **reusable** address: every payment ever made on it was for the same chain/asset, all of them `expired` with `received = 0`, and the latest expired over 24 h ago.
-2. Otherwise take `account_xpubs.next_index` and increment it.
+2. Otherwise take `account_xpubs.next_index` and increment it. New accounts start at 1: index 0 is the main address (Receive, gas for Send).
 
 Reuse exists for the wallet gap limit (wallets stop scanning after ~20 unused addresses). A quick burst of 20+ unpaid payments within 24 h can still exceed it. The funds are safe either way, but the merchant may need to raise their wallet's gap limit (Electrum: `wallet.change_gap_limit(100)`).
 
@@ -162,6 +198,11 @@ payments                              webhook_events
 - reference                           - attempts, next_attempt_at (NULL = done)
 - created_at, expires_at, confirmed_at, updated_at, next_check_at
                                       - delivered_at, last_error
+
+login_challenges                      sessions
+- nonce             PK, single use    - token_hash       PK (sha256 of "gws_…")
+- expires_at        5 min             - account_id       FK
+                                      - expires_at       12 h
 ```
 
 `db.init()` runs on API start and watcher start. It creates missing tables and adds columns
@@ -172,21 +213,23 @@ the API and the watcher write at the same time.
 
 | File | Role |
 |---|---|
-| `backend/app.py` | API routes, checkout route, security headers, serves `../frontend/public` |
+| `backend/app.py` | API routes, checkout route, wallet sign-in and balances, security headers, serves `../frontend/public` |
 | `backend/db.py` | Connection, schema, migrations, timestamp helpers |
 | `backend/xpubs.py` | `normalize()` (validate + fix version bytes) and `address()` |
 | `backend/assets.py` | Supported chain/asset pairs, decimals, confirmations, token contracts, amount parsing |
 | `backend/payments.py` | Address allocation, `next_status()` state machine, webhook queueing, API shape |
-| `backend/chain_client.py` | Read-only provider queries (`observe`) |
+| `backend/chain_client.py` | Read-only provider queries (`observe` for payments, `balance` for the wallet) |
 | `backend/webhooks.py` | URL safety checks, HMAC signing/verifying, delivery with retries |
 | `backend/watcher.py` | Background loop tying the above together; single-instance lock, cron mode |
 | `backend/test_xpubs.py`, `backend/test_payments.py` | Self-checks |
 | `frontend/build_frame.py` | Inlines `frame/` + `public/styles.css` into `public/derive.html`, pins CSP hashes |
-| `frontend/frame/derive.src.html`, `frontend/frame/derive.js` | Seed frame source (UI + derivation) |
+| `frontend/frame/derive.src.html`, `frontend/frame/derive.js` | Seed frame source: UI, derivation, vault encryption, unlock |
 | `frontend/frame/sandbox-shim.js` | In-memory `localStorage` (sandboxed frames can't touch storage) + error reporting |
 | `frontend/frame/vendor/` | Unmodified BIP39 engine from Ian Coleman's tool, with `SHA256SUMS` |
 | `frontend/public/index.html`, `xpub.html`, `app.js`, `styles.css` | Onboarding pages |
+| `frontend/public/wallet.html`, `wallet.js`, `wallet.css` | Wallet page: unlock, sign-in, balances, Receive, recent payments, new API key, lock, remove from this device |
 | `frontend/public/pay.html`, `pay.js`, `pay.css` | Checkout page for payers, served at `/pay/{id}` |
+| `frontend/public/vendor/wallet-core/` | Signing engine (Trust Wallet Core 4.8.7 + protobufjs minimal), unmodified, pinned by `SHA256SUMS`; see its `NOTICE.md` |
 | `frontend/public/vendor/kjua.js` | QR codes (MIT), extracted unchanged from the vendored BIP39 bundle |
 | `frontend/public/derive.html` | **Generated** seed frame (don't edit) |
 | `frontend/public/tools/payment-xpub-tool.html` | Downloadable offline xpub tool (built from `xpub_tool/`) |

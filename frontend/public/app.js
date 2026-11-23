@@ -4,15 +4,30 @@
     "use strict";
 
     var CHAIN_NAMES = { BTC: "Bitcoin", LTC: "Litecoin", DOGE: "Dogecoin", ETH: "Ethereum + BSC", TRX: "Tron" };
+    var VAULT_KEY = "wallet.vault.v1"; // also read by wallet.js. Holds only the password-encrypted vault.
 
     function $id(id) { return document.getElementById(id); }
+
+    function saveVault(vault, accountId) {
+        try {
+            localStorage.setItem(VAULT_KEY, JSON.stringify({ vault: vault, account_id: accountId || null,
+                                                             saved_at: new Date().toISOString() }));
+            return true;
+        } catch (e) {
+            return false; // private mode or storage blocked
+        }
+    }
+
+    function hasVault() {
+        try { return !!localStorage.getItem(VAULT_KEY); } catch (e) { return false; }
+    }
 
     function showError(msg) {
         $id("error").textContent = msg || "";
         $id("error").hidden = !msg;
     }
 
-    // POST /accounts. Returns {ok} | {errors: {chain: message}} | null (error already shown).
+    // POST /accounts. Returns {ok, data} | {errors: {chain: message}} | {conflict} | null (error already shown).
     async function createAccount(xpubs) {
         showError("");
         var res;
@@ -30,16 +45,15 @@
         var detail = data.detail || {};
         if (res.status === 201) {
             showResult(data);
-            return { ok: true };
+            return { ok: true, data: data };
         }
         if (detail.errors) return { errors: detail.errors };
-        if (res.status === 409) {
-            showError("These keys are already registered to an account. Use that account's API key, or use a different account number.");
-        } else {
-            showError(detail.error || "Something went wrong (HTTP " + res.status + "). Please try again.");
-        }
+        if (res.status === 409) return { conflict: true };
+        showError(detail.error || "Something went wrong (HTTP " + res.status + "). Please try again.");
         return null;
     }
+
+    var CONFLICT = "These keys are already registered to an account. Use that account's API key, or use a different account number.";
 
     function showResult(data) {
         ["choose", "wallet", "manual"].forEach(function (id) { if ($id(id)) $id(id).hidden = true; });
@@ -71,6 +85,8 @@
     // --- index.html: create / import through the sandboxed frame --------------------------------
     var frame = $id("frame");
     if (frame) {
+        if (hasVault()) $id("existing").hidden = false;
+
         // The frame says something (its height) as soon as its script runs. If it stays silent,
         // the browser blocked sandboxed scripts: say so instead of showing an empty box.
         var FRAME_TIMEOUT_MS = 12000; // the inlined engine is ~3.6 MB; slow phones need a few seconds
@@ -120,9 +136,24 @@
                 var xpubs = e.data.xpubs || {};
                 var valid = Object.keys(xpubs).every(function (k) { return typeof xpubs[k] === "string"; });
                 if (!valid) return;
+                var vault = e.data.vault;
                 createAccount(xpubs).then(function (r) {
-                    if (r && r.ok) frame.src = "about:blank";
-                    else if (r && r.errors) showError("The derived keys were rejected. Please reload and try again.");
+                    if (!r) return;
+                    if (r.errors) return showError("The derived keys were rejected. Please reload and try again.");
+                    // Created, or already registered (the same wallet on a new device): either way the
+                    // wallet is the merchant's, so keep its encrypted vault on this device.
+                    frame.src = "about:blank";
+                    var saved = vault && saveVault(vault, r.ok ? r.data.account_id : null);
+                    if (r.conflict) {
+                        $id("wallet").hidden = true;
+                        if (saved) {
+                            $id("restored").hidden = false;
+                        } else {
+                            showError(CONFLICT);
+                        }
+                        return;
+                    }
+                    $id(saved ? "vault-saved" : "vault-failed").hidden = false;
                 });
             }
         });
@@ -147,6 +178,7 @@
             button.disabled = true;
             var r = await createAccount(xpubs);
             button.disabled = false;
+            if (r && r.conflict) showError(CONFLICT);
             if (r && r.errors) {
                 Object.keys(r.errors).forEach(function (chain) {
                     var input = $id("x-" + chain);

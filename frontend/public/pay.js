@@ -12,7 +12,8 @@
         "BSC/BNB": "BNB Smart Chain (BEP-20)",
         "BSC/USDT": "BNB Smart Chain (BEP-20)",
         "TRX/TRX": "Tron",
-        "TRX/USDT": "Tron (TRC-20)"
+        "TRX/USDT": "Tron (TRC-20)",
+        "SEPOLIA/ETH": "Sepolia testnet (test ETH, no real value)"
     };
     // BIP21 URIs carry the amount, and every BTC/LTC/DOGE wallet reads them. For EVM and Tron the QR
     // is the bare address: payment URIs there are read inconsistently and could send the wrong token.

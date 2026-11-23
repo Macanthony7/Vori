@@ -10,6 +10,7 @@ All responses are JSON. Errors use FastAPI's shape: `{"detail": {"error": "..."}
 - [Assets](#assets)
 - Accounts: [`POST /accounts`](#post-accounts), [`GET /accounts/me`](#get-accountsme)
 - Payments: [`POST /payments`](#post-payments), [`GET /payments/{id}`](#get-paymentsid), [`GET /payments`](#get-payments), [statuses](#payment-statuses)
+- Wallet: [sign-in, balances, new API key](#wallet)
 - Webhooks: [`PUT /accounts/me/webhook`](#put-accountsmewebhook), [`DELETE /accounts/me/webhook`](#delete-accountsmewebhook), [events and signatures](#webhooks)
 
 ## Authentication
@@ -20,9 +21,12 @@ Send the API key as a bearer token:
 Authorization: Bearer gw_...
 ```
 
-The key is shown once, at account creation. Only its SHA-256 hash is stored, so a lost key can't be
-recovered or shown again. (Recovery by signed message is planned, see
-[security.md](security.md#known-gaps).)
+The key is shown once, at account creation. Only its SHA-256 hash is stored, so it can't be shown
+again. A lost key is replaced from the wallet: sign in there and use
+[`POST /accounts/me/api-key`](#post-accountsmeapi-key).
+
+Every authenticated endpoint also accepts a **wallet session** token (`Authorization: Bearer gws_...`),
+which the wallet page gets by [signing in](#wallet). It expires after 12 hours.
 
 ## Assets
 
@@ -165,7 +169,9 @@ chain (`no LTC xpub is registered on this account`). **401**: bad key.
 
 ### Address assignment
 
-Each payment gets the next unused address of the merchant's xpub (`…/0/index`). To respect the
+Index 0 is the merchant's **main address** (Receive, and gas for sending), so payments on
+accounts created from now on start at index 1. Each payment gets the next unused address of the
+merchant's xpub (`…/0/index`). To respect the
 wallet **gap limit** (wallets stop scanning after ~20 unused addresses in a row), an address is
 reused when every payment on it was for the same chain and asset, expired with **nothing**
 received, and the last one expired more than **24 hours** ago. An address that ever received funds
@@ -244,6 +250,114 @@ Same fields as the payment object **minus `reference`** (your order data stays p
 `amount_due` (amount minus received, never below 0) and `server_time` (so the countdown is right
 even when the payer's clock is wrong). Don't use it from your server: use the authenticated
 `GET /payments/{id}`.
+
+## Wallet
+
+Used by the wallet page (`wallet.html`). Sign-in needs no API key: the wallet proves it owns the
+account by signing with the private key of the BTC main address (`m/44'/0'/account'/0/0`), which the
+server checks against the stored BTC xpub. Accounts created with xpub keys only (no phrase in our
+wallet) keep using their API key.
+
+The dashboard's "New payment" form calls `POST /payments` with the session, so a merchant can
+make a checkout link without a shop integration.
+
+### `POST /auth/challenge`
+
+No auth. `{"challenge": "gw-login:…", "expires_at": "…"}`. Valid 5 minutes, single use.
+
+### `POST /auth/login`
+
+```json
+{ "xpub": "xpub6C…", "challenge": "gw-login:…", "signature": "3044…" }
+```
+
+`xpub`: the account's BTC xpub. `signature`: hex DER ECDSA (secp256k1) over
+`sha256("Gateway login\n" + challenge)`. The fixed prefix means a login signature can never be
+reused as a transaction signature. **200**: `{"token": "gws_…", "account_id": 1, "expires_at": "…"}`.
+**401**: expired/used challenge, no account for this xpub, or bad signature. The challenge is
+consumed either way.
+
+### `DELETE /auth/session`
+
+Ends the session in the `Authorization` header (the wallet's Lock button). **204**.
+
+### `POST /accounts/me/api-key`
+
+Authenticated (API key or session). Makes a new API key and returns it once:
+`{"api_key": "gw_…"}`. **The old key stops working immediately.**
+
+### `GET /wallet/balances`
+
+Authenticated. Live balances, per chain/asset the account supports:
+
+```json
+{
+  "balances": [
+    {
+      "chain": "TRX", "asset": "USDT",
+      "balance": "25.5",
+      "complete": true,
+      "main_address": "TUEZSdKsoDHQMeZwihtdoBiN46zxhGWYdH",
+      "addresses": [ { "address": "TA891F…", "index": 3, "balance": "25.5" } ]
+    }
+  ]
+}
+```
+
+- Counted addresses: the main address, plus every payment address that ever received funds. That's
+  the whole wallet: we created every address, so there's no gap limit.
+- `balance` is the current on-chain balance, unconfirmed included, like any wallet shows. It drops
+  when funds are spent, from our wallet or anywhere else.
+- `complete: false`: a provider couldn't be reached for at least one address, so the real balance
+  may be higher. The wallet shows "≥". Without `BLOCKCYPHER_TOKEN`, BTC/LTC/DOGE often hit
+  BlockCypher's rate limit.
+- `addresses` lists only addresses holding funds. Results are cached for 60 s per address.
+
+### `GET /wallet/send/{chain}`
+
+Authenticated. `chain`: `BTC`, `LTC`, `DOGE` (`"kind": "utxo"`), or `ETH`, `BSC`, `SEPOLIA` for their
+native coin (`"kind": "evm"`). `SEPOLIA` only with `GATEWAY_TESTNETS=1`. Others: **400**, not
+supported yet. What the wallet frame needs to plan a send. UTXO chains:
+
+```json
+{
+  "chain": "BTC",
+  "utxos": [ { "address": "1Ak8Pff…", "index": 1, "tx_hash": "…", "vout": 0, "value": 100000, "confirmations": 3 } ],
+  "fee_per_byte": { "slow": 2, "normal": 5, "fast": 12 },
+  "change_index": 0,
+  "change_address": "1LqBGSKu…"
+}
+```
+
+Coins with at least 1 confirmation on the main address and every payment address that ever
+received funds. `value` and `fee_per_byte` are in smallest units (satoshis). Change goes back to the
+main address. EVM chains:
+
+```json
+{
+  "chain": "SEPOLIA", "kind": "evm", "asset": "ETH", "chain_id": 11155111, "gas_limit": 21000,
+  "fees": {
+    "type": "eip1559",
+    "slow":   { "max_fee_per_gas": "100000038",  "max_priority_fee_per_gas": "100000000" },
+    "normal": { "max_fee_per_gas": "1000000020", "max_priority_fee_per_gas": "999999982" },
+    "fast":   { "max_fee_per_gas": "1000000020", "max_priority_fee_per_gas": "999999982" }
+  },
+  "sources": [ { "address": "0x9858…", "index": 0, "balance": "39999999064069", "nonce": 402 } ]
+}
+```
+
+`sources`: every wallet address (main + funded payment addresses) with a balance, with its next
+nonce. Each sends its own transfer and pays its own fee. Amounts are wei, as strings. Fees: tips are
+the 10th/50th/90th percentile of the last 10 blocks (minimum 0.1 gwei), max fee = 2 × next base fee +
+tip. BSC returns `"type": "legacy"` with `gas_price` per speed. **502**: the provider couldn't be read.
+
+### `POST /wallet/send/{chain}`
+
+Authenticated. `{"txs": ["0100…", …]}`: transactions signed by the wallet frame (1 to 50, hex).
+Relayed in order (BlockCypher for UTXO chains, `eth_sendRawTransaction` for EVM), stopping at the
+first rejection: `{"chain": "SEPOLIA", "tx_hashes": ["0x…"], "error": null}`. If some went through
+before a rejection, `tx_hashes` lists them and `error` says which one failed and why. **502** if the
+first one is rejected (for example a fee too low). **422**: not hex.
 
 ## Payment statuses
 
@@ -354,7 +468,7 @@ function verify(secret, rawBody, header, tolerance = 300) {
 ## Response headers
 
 Every response: `Content-Security-Policy: frame-ancestors 'self'`, `X-Content-Type-Options: nosniff`,
-`Referrer-Policy: no-referrer`. `/accounts*`, `/payments*` and `/pay/*` also send `Cache-Control: no-store`.
+`Referrer-Policy: no-referrer`. `/accounts*`, `/payments*`, `/pay/*`, `/auth*` and `/wallet*` also send `Cache-Control: no-store`.
 
 ## Example session
 

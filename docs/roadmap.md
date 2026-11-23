@@ -6,34 +6,51 @@ last commit that contains it is `b18a440`. This page keeps what's still useful f
 
 ## Plan
 
-**The product: a non-custodial wallet that is also a payment gateway.** Think of Trust Wallet with
-a checkout page and an API. Keys stay on the merchant's device, and the server only creates
-addresses from xpubs and watches them. The merchant sees one balance per coin, even though every
-payment arrives on its own fresh address, and moves funds with **Send**, signed on their own device.
+**The product: a self-custody wallet with merchant features built in.** Think of Trust Wallet with
+a checkout page and an API.
 
-Focus: **the payment engine first**. Revenue features wait until the engine is solid.
+| Side | Lives where | Parts |
+|---|---|---|
+| **Wallet** (the merchant controls it) | The merchant's device | Password-protected vault holding the recovery phrase; one balance per coin across all payment addresses; Receive; Send, signed on the device |
+| **Merchant features** | Our server, which only ever sees xpubs | A fresh address per payment, checkout page, watcher, API keys, signed webhooks |
+
+Every payment arrives on its own fresh address, but the merchant sees one balance per coin and
+moves funds with **Send**, unlocked with their password like MetaMask or Solflare's web wallet.
+
+Focus: **the engine first**. Revenue features wait until it's solid.
 
 ### Engine (in order)
 
 | # | Item | Why | Notes |
 |---|---|---|---|
-| 1 | **Hosted checkout page** `/pay/{id}` | The payer never saw anything; the address only existed in an API response | **Done:** see [api.md](api.md#checkout-page). Amount, network, address with QR and copy, countdown, live status. No API key: the unguessable payment id is the access token. |
-| 2 | **Transaction hash on payments** | Receipts, explorer links on the checkout page, support | See [Transaction hashes](#transaction-hashes-how-the-prototype-found-them). |
-| 3 | **"Paid late" detection** | Funds arriving after `expired` are invisible today | Keep observing expired payments for 24 h and emit `payment.paid_late`. |
-| 4 | **Wallet dashboard: Balance + Receive** | The merchant needs to see the money in one place | Balance per coin = confirmed payments minus what was sent, summed over **every** issued address (we know every index, so there's no gap limit). Refresh only addresses that hold funds when the dashboard opens; don't poll every address forever. Payment history. Sign in with the API key for now. |
-| 5 | **Send, signed on the merchant's device** | Moving funds without custody | Signed in the offline seed frame; the page only broadcasts the signed transaction. See [Sending and gas](#sending-and-gas). Order: BTC/LTC/DOGE → native ETH/BNB/TRX → USDT. |
-| 6 | **Stop reusing addresses** | Payers never see a repeated address | Reuse exists only because other wallets stop scanning after ~20 empty addresses. Once our wallet (item 4) shows every address, drop it. Keep an opt-in for merchants who spend from another wallet. |
-| 7 | Rate limiting | Abuse, provider quota | `POST /accounts` per IP, `POST /payments` per key, `GET /pay/{id}/status` per IP. |
-| 8 | API key recovery | No email to reset | Sign a challenge with the key at `…/0/0`, verify against the stored xpub. Also the natural dashboard login. |
-| 9 | BlockCypher push hooks | Save BTC/LTC/DOGE quota | See [BlockCypher push hooks](#blockcypher-push-hooks). |
-| 10 | Encrypt xpubs at rest | DB-only leaks | Server-held key. |
+| 1 | **Hosted checkout page** `/pay/{id}` | The payer never saw anything; the address only existed in an API response | **Done:** see [api.md](api.md#checkout-page). |
+| 2 | **Wallet vault** | Send without retyping the phrase every time | **Done** (verified in Chrome): see [security.md](security.md#wallet-vault). The phrase is encrypted with the merchant's password inside the offline frame; the page stores only the ciphertext on this device. Unlock with the password; auto-locks. |
+| 3 | **Wallet dashboard: Balance + Receive** | The merchant needs to see the money in one place | **Done:** see [api.md](api.md#wallet). Live balance per coin over the main address plus every payment address that ever received funds (no gap limit). Receive = the main address (index 0); payments start at index 1. Recent payments. Balances cached 60 s. |
+| 4 | **Dashboard login without the API key** | The API key shouldn't need to live in the browser | **Done:** the unlocked vault signs a single-use challenge with the BTC main key; the server verifies it against the stored xpub and issues a 12 h session. Also gives **API key recovery** (`POST /accounts/me/api-key`). |
+| 5 | **Send, signed on the merchant's device** | Moving funds without custody | **BTC/LTC/DOGE and native ETH/BNB done** (Sepolia test network for trying it; not yet tried with real funds): see [security.md](security.md#sending-btc-ltc-doge). Steps modeled on Gem Wallet (prepare → plan → confirm in the frame → sign → relay); signing engine Trust Wallet Core. Next: native TRX, then USDT (gas from the main address). See [Sending and gas](#sending-and-gas). **Required before launch for ETH, BSC and Tron:** other wallets don't show our payment addresses there. |
+| 6 | **Transaction hash on payments** | Receipts, explorer links on the checkout page, support | See [Transaction hashes](#transaction-hashes-how-the-prototype-found-them). |
+| 7 | **"Paid late" detection** | Funds arriving after `expired` are invisible today | Keep observing expired payments for 24 h and emit `payment.paid_late`. |
+| 8 | **Stop reusing addresses** | Payers never see a repeated address | Reuse exists only because other wallets stop scanning after ~20 empty addresses. Once our wallet shows every address, drop it. Keep an opt-in for merchants who spend from another wallet. |
+| 9 | Rate limiting | Abuse, provider quota | `POST /accounts` per IP, `POST /payments` per key, `GET /pay/{id}/status` per IP. |
+| 10 | BlockCypher push hooks | Save BTC/LTC/DOGE quota | See [BlockCypher push hooks](#blockcypher-push-hooks). |
+| 11 | Encrypt xpubs at rest | DB-only leaks | Server-held key. |
+
+### Reference: Gem Wallet
+
+[Gem Wallet](https://github.com/gemwalletcom/wallet) (open-source iOS/Android wallet) is the
+reference design for the wallet side. It's **GPL-3.0**, so we use it for ideas only and copy no
+code; signing uses Trust Wallet Core (Apache-2.0/MIT) instead. Taken so far: the keystore format
+(authenticated metadata, strict fields), the send steps, and a confirm screen in the signing
+context. Still to take: per-chain fee rules (EIP-1559 priorities, Tron energy/bandwidth and the
+new-account cost), transaction tracking after broadcast, and passkey/biometric unlock (WebAuthn
+PRF) in place of the password.
 
 ### Later: optional
 
 | Item | Notes |
 |---|---|
+| Browser extension / mobile app | Safer home for the vault: the code is installed once instead of downloaded on every visit (see [security.md](security.md#wallet-vault)). How MetaMask, Trust Wallet and Solflare grew. |
 | Forwarder contracts ("auto-sweep") | Only if merchants want funds to move without pressing Send. CREATE2 forwarders + a relayer + prepaid gas. Needs a contract audit. Not needed for the wallet model. |
-| Encrypted vault in the browser | So merchants don't retype their phrase for every Send. Riskier: the sandboxed frame can't store anything today. |
 
 ### Later: revenue
 
