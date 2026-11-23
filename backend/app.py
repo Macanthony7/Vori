@@ -293,6 +293,43 @@ def wallet_balances(authorization: str = Header(None)):
     return {"balances": out}
 
 
+@app.post("/wallet/scan")
+def wallet_scan(authorization: str = Header(None)):
+    """Check every expired payment address that never received anything, and record coins found there.
+
+    The watcher stops looking at a payment 24 h after it expires. This covers anything later.
+    Found coins count as received (so balances and Send include them) and fire `payment.paid_late`.
+    ponytail: one provider call per address, on demand; batch or page it if accounts get big.
+    """
+    acct = account_for(authorization)
+    with closing(db.connect()) as conn:
+        # Latest payment per address (older databases may have reused addresses): SQLite returns the
+        # bare columns of the MAX(created_at) row.
+        rows = conn.execute(
+            """SELECT *, MAX(created_at) FROM payments WHERE account_id = ?
+               GROUP BY chain, asset, address
+               HAVING SUM(received != '0') = 0 AND SUM(status != 'expired') = 0""", (acct["id"],)).fetchall()
+
+        def look(p):
+            try:
+                return chain_client.observe(p["chain"], p["asset"], p["address"],
+                                            ASSETS[(p["chain"], p["asset"])]["confirmations"])
+            except chain_client.ChainError:
+                return None
+
+        found = failed = 0
+        now = datetime.now(timezone.utc)
+        for p, seen in zip(rows, pool_map(look, rows)):
+            if seen is None:
+                failed += 1
+            elif seen[0] > 0:
+                payments.apply_observation(conn, p, seen[0], seen[1], now)
+                found += 1
+    if found:
+        _balance_cache.clear()
+    return {"checked": len(rows) - failed, "found": found, "failed": failed}
+
+
 # --- Wallet send ----------------------------------------------------------------------------------
 # BTC / LTC / DOGE, native ETH / BNB / TRX, and USDT on Ethereum, BNB Smart Chain and Tron (plus the
 # test networks). The server only reads balances and relays signed transactions. Planning, the confirm

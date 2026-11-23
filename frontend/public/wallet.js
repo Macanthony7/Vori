@@ -235,8 +235,9 @@
             link.href = "/pay/" + encodeURIComponent(p.id);
             created.appendChild(link);
             var name = label(p.chain, p.asset);
-            tr.append(created, el("td", "num", p.amount + " " + name[0] + " on " + name[1]),
-                      el("td", "", STATUS[p.status] || p.status));
+            var state = STATUS[p.status] || p.status;
+            if (p.status === "expired" && p.amount_received !== "0") state += ", " + p.amount_received + " received";
+            tr.append(created, el("td", "num", p.amount + " " + name[0] + " on " + name[1]), el("td", "", state));
             body.appendChild(tr);
         });
         $id("payments").hidden = !data.payments.length;
@@ -443,6 +444,22 @@
     }
 
     $id("refresh").addEventListener("click", loadDashboard);
+    $id("scan").addEventListener("click", async function () {
+        var button = this, out = $id("scan-result");
+        button.disabled = true;
+        out.hidden = false;
+        out.textContent = "Checking every payment address. This can take a minute…";
+        try {
+            var r = await api("POST", "/wallet/scan");
+            out.textContent = "Checked " + r.checked + " address" + (r.checked === 1 ? "" : "es") + ". " +
+                (r.found ? "Found coins on " + r.found + "; they're now in your balances and payments." : "No late coins found.") +
+                (r.failed ? " " + r.failed + " couldn't be checked right now; try again later." : "");
+            if (r.found) loadDashboard();
+        } catch (e) {
+            out.textContent = "Couldn't check the addresses (" + e.message + ").";
+        }
+        button.disabled = false;
+    });
     $id("receive-close").addEventListener("click", function () { $id("receive").hidden = true; });
     $id("receive-copy").addEventListener("click", function () { copy("receive-address", this); });
     $id("new-key-copy").addEventListener("click", function () { copy("new-key-value", this); });

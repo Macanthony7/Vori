@@ -13,7 +13,10 @@ from xpubs import address
 
 WINDOW = timedelta(minutes=30)        # time the customer has to send the payment
 CONFIRM_GRACE = timedelta(hours=24)   # how long a seen-but-unconfirmed payment is still watched
-REUSE_AFTER = timedelta(hours=24)     # quarantine before an unpaid address can be handed out again
+LATE_WATCH = timedelta(hours=24)      # expired payments are still watched this long, for late funds
+# ponytail: one slow pace for all chains; 96 provider calls per expired payment per day.
+# BlockCypher push hooks (roadmap) would replace polling for BTC/LTC/DOGE if quota gets tight.
+LATE_CHECK = timedelta(minutes=15)
 CHECK_EVERY = {"BTC": 60, "LTC": 60, "DOGE": 60, "ETH": 15, "BSC": 10, "TRX": 10, "SEPOLIA": 12, "NILE": 10}  # seconds
 OPEN = ("pending", "confirming")
 EVENTS = {"confirming": "payment.confirming", "confirmed": "payment.confirmed", "expired": "payment.expired"}
@@ -48,27 +51,14 @@ def create(conn, account_id, chain, asset, amount, reference=None, now=None):
         if not row:
             raise PaymentError(f"no {spec['xpub']} xpub is registered on this account")
 
-        # Gap limit: wallets stop scanning after ~20 unused addresses in a row. Hand an address
-        # back out only if every payment on it was for the same chain/asset, expired with nothing
-        # received, and the last one expired over REUSE_AFTER ago.
-        reuse = conn.execute(
-            """SELECT address_index, address FROM payments
-               WHERE account_id = ? AND xpub_chain = ?
-               GROUP BY address_index
-               HAVING SUM(status != 'expired' OR received != '0' OR chain != ? OR asset != ?) = 0
-                  AND MAX(expires_at) < ?
-               ORDER BY address_index LIMIT 1""",
-            (account_id, spec["xpub"], chain, asset, db.at(now - REUSE_AFTER)),
-        ).fetchone()
-        if reuse:
-            index, addr = reuse["address_index"], reuse["address"]
-        else:
-            index = row["next_index"]
-            addr = address(spec["xpub"], row["xpub"], index)
-            conn.execute(
-                "UPDATE account_xpubs SET next_index = next_index + 1 WHERE account_id = ? AND chain = ?",
-                (account_id, spec["xpub"]),
-            )
+        # Every payment gets a never-used address. The gateway's wallet tracks every one of them, so
+        # the gap limit of other wallets doesn't matter here (docs/architecture.md#address-allocation).
+        index = row["next_index"]
+        addr = address(spec["xpub"], row["xpub"], index)
+        conn.execute(
+            "UPDATE account_xpubs SET next_index = next_index + 1 WHERE account_id = ? AND chain = ?",
+            (account_id, spec["xpub"]),
+        )
 
         payment_id = "pay_" + secrets.token_urlsafe(16)
         stamp = db.at(now)
@@ -103,20 +93,30 @@ def next_status(p, seen, confirmed, now):
 
 
 def apply_observation(conn, p, seen, confirmed, now):
-    """Store what the chain showed; queue a webhook if the status changed. Returns the new status."""
+    """Store what the chain showed; queue a webhook if the status changed, or `payment.paid_late` if
+    more confirmed funds arrived on an expired payment. Returns the new status."""
+    if p["status"] == "expired":
+        # EVM/Tron observe a balance, which drops when the merchant sends the coins on. Keep the
+        # high-water mark so an expired payment never "loses" what it received.
+        # ponytail: new late funds after such a send are missed until they exceed the old amount.
+        seen, confirmed = max(seen, int(p["received"])), max(confirmed, int(p["received_confirmed"]))
     status = next_status(p, seen, confirmed, now)
     stamp = db.at(now)
-    next_check = db.at(now + timedelta(seconds=CHECK_EVERY[p["chain"]]))
+    pace = LATE_CHECK if status == "expired" else timedelta(seconds=CHECK_EVERY[p["chain"]])
+    next_check = db.at(now + pace)
     with conn:
         updated = conn.execute(
             """UPDATE payments SET received = ?, received_confirmed = ?, status = ?, updated_at = ?,
                       next_check_at = ?, confirmed_at = CASE WHEN ? = 'confirmed' THEN ? ELSE confirmed_at END
-               WHERE id = ? AND status = ?""",  # status guard: never overwrite a concurrent change
-            (str(seen), str(confirmed), status, stamp, next_check, status, stamp, p["id"], p["status"]),
+               WHERE id = ? AND status = ? AND received_confirmed = ?""",  # never overwrite a concurrent change
+            (str(seen), str(confirmed), status, stamp, next_check, status, stamp, p["id"], p["status"],
+             p["received_confirmed"]),
         ).rowcount
-        # Only the writer that actually made the transition queues the event: no duplicate webhooks.
+        # Only the writer that actually made the change queues the event: no duplicate webhooks.
         if updated and status != p["status"]:
             queue_webhook(conn, p["id"], EVENTS[status], now)
+        elif updated and p["status"] == "expired" and confirmed > int(p["received_confirmed"]):
+            queue_webhook(conn, p["id"], "payment.paid_late", now)
     return status
 
 

@@ -365,17 +365,46 @@ def demo():
         ev = conn.execute("SELECT * FROM webhook_events WHERE payment_id = ?", (p["id"],)).fetchone()
         assert ev["attempts"] == 2 and ev["delivered_at"] and ev["next_attempt_at"] is None, dict(ev)
 
-        # --- address reuse (gap limit) -------------------------------------------------------------
-        # btc2 expired unpaid at step(30). Within 24h: a new address. After: btc2's address again.
-        fresh = payments.create(conn, 1, "BTC", "BTC", "1", now=step(60))
-        assert fresh["address"] not in (btc["address"], btc2["address"])
-        reused = payments.create(conn, 1, "BTC", "BTC", "1", now=step(30 + 24 * 60 + 1))
-        assert reused["address"] == btc2["address"], "expired-unpaid address should be reused after 24h"
-        # trx (underpaid) must never be reused; nor may an address move to another asset.
-        again = payments.create(conn, 1, "TRX", "USDT", "1", now=step(5000))
-        assert again["address"] != trx["address"], "an address that received funds must not be reused"
-        bnb = payments.create(conn, 1, "BSC", "BNB", "1", now=step(5000))
-        assert bnb["address"] != bsc["address"], "reuse only for the same chain/asset"
+        # --- no address reuse; late funds ---------------------------------------------------------------
+        # btc2 expired unpaid at step(30). A day later it still isn't handed out again.
+        fresh = payments.create(conn, 1, "BTC", "BTC", "1", now=step(30 + 24 * 60 + 1))
+        assert fresh["address"] not in (btc["address"], btc2["address"]), "addresses are never reused"
+
+        # Paid after expiry, within 24h: still watched; stays expired, fires payment.paid_late once.
+        chain[("BTC", "BTC", btc2["address"])] = (50_000_000, 0)
+        run(step(100))
+        assert status(btc2)["status"] == "expired" and status(btc2)["amount_received"] == "0.5"
+        assert json.loads(Receiver.calls[-1][1])["event"] != "payment.paid_late", "not until confirmed"
+        chain[("BTC", "BTC", btc2["address"])] = (50_000_000, 50_000_000)
+        run(step(120))
+        assert json.loads(Receiver.calls[-1][1])["event"] == "payment.paid_late"
+        assert status(btc2)["amount_confirmed"] == "0.5"
+        n = len(Receiver.calls)
+        run(step(140))
+        assert len(Receiver.calls) == n, "no repeat paid_late for the same funds"
+        # A balance-based chain (EVM/Tron) going down after the merchant sends the coins on: kept.
+        chain[("BTC", "BTC", btc2["address"])] = (0, 0)
+        run(step(160))
+        assert status(btc2)["amount_received"] == "0.5", "expired payments keep what they received"
+
+        # Past the 24h watch: the watcher ignores it; the wallet's scan finds it.
+        chain[("BSC", "USDT", bsc["address"])] = (3 * 10**18, 3 * 10**18)
+        run(step(32 + 24 * 60 + 30))
+        assert status(bsc)["amount_received"] == "0", "watcher stops 24h after expiry"
+        real_observe = app_module.chain_client.observe
+        app_module.chain_client.observe = lambda c, a, addr, n: observe(c, a, addr, n)
+        down.add(fresh["address"])
+        try:
+            r = api.post("/wallet/scan", headers=key)
+        finally:
+            app_module.chain_client.observe = real_observe
+            down.clear()
+        # bsc found, fresh unreachable, the rest checked; btc2 (already received) not rescanned.
+        assert r.status_code == 200 and r.json()["found"] == 1 and r.json()["failed"] == 1, r.text
+        assert status(bsc)["status"] == "expired" and status(bsc)["amount_received"] == "3"
+        ev = conn.execute("SELECT event FROM webhook_events WHERE payment_id = ? ORDER BY id DESC", (bsc["id"],)).fetchone()
+        assert ev["event"] == "payment.paid_late", "queued; the watcher delivers it"
+        assert api.post("/wallet/scan", headers=other).json()["found"] == 0  # only your own payments
 
         # Two watchers applying the same transition from the same stale row: one webhook, not two.
         stale = payments.create(conn, 1, "BTC", "BTC", "1", now=step(6000))

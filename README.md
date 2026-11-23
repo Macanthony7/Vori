@@ -50,8 +50,9 @@ backend/
 | Wallet dashboard: live balances, Receive, recent payments, sign-in by signature, API key recovery | Built and tested; checked in the preview browser (signatures from the real frame code verified by the server) |
 | Send BTC / LTC / DOGE, signed in the offline frame (Trust Wallet Core) | Built and tested; signatures verified independently; not yet tried with real funds or inside Chrome's sandboxed frame |
 | Send native ETH / BNB, plus the Sepolia test network (`GATEWAY_TESTNETS=1`) | Built and tested; Sepolia transfer signed in the browser and verified independently; not yet broadcast |
-| Send TRX and USDT (ETH, BSC, Tron) with gas top-ups from the main address, plus Nile and Sepolia USDT test networks | Built; signed in the browser with live testnet data and verified independently; not yet broadcast |
-| Transaction hashes, paid-late, rate limiting | Planned, see [docs/roadmap.md](docs/roadmap.md) |
+| Send TRX and USDT (ETH, BSC, Tron) with gas top-ups from the main address, plus Nile and Sepolia USDT test networks | Built; tested end to end on Nile (payments and sends) |
+| No address reuse; paid-late watch (24 h) and "Check all payment addresses" | Built; late payment tested end to end on Nile |
+| Transaction hashes, rate limiting | Planned, see [docs/roadmap.md](docs/roadmap.md) |
 | Free-tier limits, paid plans | Later |
 
 ## Quick start (development)

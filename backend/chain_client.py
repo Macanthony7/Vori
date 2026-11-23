@@ -4,8 +4,8 @@ observe(chain, asset, address, confirmations) -> (seen, confirmed), both in smal
   seen       everything sent to the address so far, including unconfirmed
   confirmed  the part with at least `confirmations` confirmations
 
-Payment addresses are fresh (or reused only after receiving nothing), so "balance" and
-"received" are the same thing for EVM and Tron. Configuration: docs/setup.md#providers
+Payment addresses are never reused, so "balance" and "received" are the same thing for EVM
+and Tron until the merchant sends the coins on. Configuration: docs/setup.md#providers
 """
 import os
 

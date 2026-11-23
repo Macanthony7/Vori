@@ -9,6 +9,8 @@
 - `backend/requirements.txt` replaces the old root `requirements.txt`.
 
 ### Added
+- **No more address reuse:** every payment gets a new address. Merchants who restore the phrase in another wallet raise its gap limit (see `docs/api.md#address-assignment`).
+- **Paid late:** the watcher keeps checking expired payments for 24 h and sends the new `payment.paid_late` webhook when confirmed funds arrive (the payment stays `expired`). For anything later, "Check all payment addresses" on the wallet page (new `POST /wallet/scan`). Recent payments show "Expired, X received".
 - **Send TRX and USDT** (Ethereum, BNB Smart Chain, Tron). Gas for USDT comes from the main address: the frame signs a top-up to each payment address that lacks gas plus the token transfers, and the page relays the token transfers once the top-ups have confirmed (new `GET /wallet/tx/{chain}/{hash}`). Token contracts and decimals are pinned in the frame. `GET /wallet/send/{chain}` takes `asset` and `to`.
 - **Test networks:** Tron Nile (TRX, USDT) and Sepolia USDT, behind `GATEWAY_TESTNETS=1`.
 - **New payment form** on the wallet dashboard: pick an amount and a coin/network, get a fresh address and a link to its checkout page (`POST /payments` with the wallet session).

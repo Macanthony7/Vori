@@ -171,11 +171,13 @@ chain (`no LTC xpub is registered on this account`). **401**: bad key.
 
 Index 0 is the merchant's **main address** (Receive, and gas for sending), so payments on
 accounts created from now on start at index 1. Each payment gets the next unused address of the
-merchant's xpub (`…/0/index`). To respect the
-wallet **gap limit** (wallets stop scanning after ~20 unused addresses in a row), an address is
-reused when every payment on it was for the same chain and asset, expired with **nothing**
-received, and the last one expired more than **24 hours** ago. An address that ever received funds
-is never handed out again.
+merchant's xpub (`…/0/index`). Addresses are **never reused**, not even after an unpaid payment
+expires.
+
+Our wallet tracks every address it handed out, so it has no gap limit. Other wallets stop scanning
+after about 20 unused addresses in a row. If you restore the phrase in one of those, raise its gap
+limit (Electrum: `wallet.change_gap_limit(200)` in the console; Sparrow: Settings → Gap limit) or
+some payment addresses won't show up there. The coins are safe either way.
 
 ---
 
@@ -313,6 +315,16 @@ Authenticated. Live balances, per chain/asset the account supports:
   BlockCypher's rate limit.
 - `addresses` lists only addresses holding funds. Results are cached for 60 s per address.
 
+### `POST /wallet/scan`
+
+Authenticated. Checks every address of an `expired` payment that never received anything, for
+coins sent long after the payment expired (the watcher stops looking 24 h after expiry). Coins found
+are recorded as that payment's `amount_received` (the payment stays `expired`), so they show up in
+balances and Send, and `payment.paid_late` is sent. **200**:
+`{"checked": 41, "found": 1, "failed": 0}`. `failed` addresses couldn't be read right now; try again
+later. One provider request per address, so it can take a while on big accounts. The wallet page's
+"Check all payment addresses" button calls it.
+
 ### `GET /wallet/send/{chain}`
 
 Authenticated. `chain`: `BTC`, `LTC`, `DOGE` (`"kind": "utxo"`), `ETH`, `BSC`, `SEPOLIA`
@@ -412,7 +424,7 @@ stateDiagram-v2
 
 - The payment window is **30 minutes** from `created_at`. A payment first seen at the first check after the window closes still counts.
 - Overpayments count as paid. Underpayments never do: anything below `amount` stays `pending` and then `expired`.
-- Funds that arrive after `expired` still land in the merchant's wallet (it's their address), but the payment stays `expired`. Refund or settle those by hand.
+- Funds that arrive after `expired` still land in the merchant's wallet (it's their address), but the payment stays `expired`. The watcher keeps checking expired payments for **24 hours** (every 15 minutes): new confirmed funds update `amount_received` / `amount_confirmed` and send `payment.paid_late`. Refund or settle those by hand. Anything later is found by [`POST /wallet/scan`](#post-walletscan).
 - If the chain provider can't be reached, the payment is **not** expired. It's checked again once the provider answers.
 
 ---
@@ -456,6 +468,7 @@ Gateway-Signature: t=1795369511,v1=5f2c0e…
 | `payment.confirming` | Full amount seen, waiting for confirmations |
 | `payment.confirmed` | Final: paid and confirmed |
 | `payment.expired` | Final: not paid (or not confirmed) in time |
+| `payment.paid_late` | More confirmed funds arrived on an `expired` payment. `status` stays `expired`; check `amount_confirmed` and refund or fulfil by hand |
 
 **Delivery:** any `2xx` response counts as delivered. Otherwise the event is retried after 1 min,
 5 min, 30 min, 2 h, 6 h and 24 h, then dropped. Redirects aren't followed. The timeout is 10 s.

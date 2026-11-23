@@ -107,7 +107,7 @@ sequenceDiagram
     participant C as Chain provider
     participant X as Customer
     M->>S: POST /payments {chain, asset, amount}
-    S->>S: allocate address (next index or safe reuse)
+    S->>S: allocate address (next unused index)
     S->>M: {id, address, amount, expires_at, checkout_url}
     M->>X: redirect to checkout_url (/pay/{id})
     loop every 5 s
@@ -125,18 +125,21 @@ sequenceDiagram
 
 Inside one `BEGIN IMMEDIATE` transaction, so two requests can't take the same new index:
 
-1. Look for a **reusable** address: every payment ever made on it was for the same chain/asset, all of them `expired` with `received = 0`, and the latest expired over 24 h ago.
-2. Otherwise take `account_xpubs.next_index` and increment it. New accounts start at 1: index 0 is the main address (Receive, gas for Send).
+take `account_xpubs.next_index` and increment it. New accounts start at 1: index 0 is the main address (Receive, gas for Send).
 
-Reuse exists for the wallet gap limit (wallets stop scanning after ~20 unused addresses). A quick burst of 20+ unpaid payments within 24 h can still exceed it. The funds are safe either way, but the merchant may need to raise their wallet's gap limit (Electrum: `wallet.change_gap_limit(100)`).
+Addresses are never reused. Earlier versions handed an unpaid address out again after 24 h, only
+because other wallets stop scanning after ~20 unused addresses (gap limit). Our wallet doesn't
+need that: it knows every address it handed out. Late coins are caught by the watcher for 24 h
+after expiry and, after that, by the wallet's "Check all payment addresses" (`POST /wallet/scan`).
+Merchants who restore the phrase in another wallet raise its gap limit ([api.md](api.md#address-assignment)).
 
 ### Watcher (`watcher.py`)
 
 One pass (`tick`) every 5 s:
-1. Load open payments whose `next_check_at` has passed.
+1. Load payments whose `next_check_at` has passed: open ones, plus `expired` ones for 24 h after expiry (late funds, checked every 15 min, `payments.LATE_WATCH` / `LATE_CHECK`).
 2. `chain_client.observe()` returns `(seen, confirmed)` in smallest units.
 3. `payments.next_status()`, a pure function, decides the new status (rules in [api.md](api.md#payment-statuses)).
-4. Store amounts and status. On a change, queue a webhook event in the same transaction.
+4. Store amounts and status. On a change, queue a webhook event in the same transaction. On an expired payment, more confirmed funds queue `payment.paid_late`; amounts never go down there (the merchant may have sent the coins on).
 5. `webhooks.deliver_due()` sends queued events and schedules retries.
 
 Per-chain pacing (`payments.CHECK_EVERY`): BTC/LTC/DOGE 60 s (BlockCypher rate limits), ETH 15 s, BSC and TRX 10 s. A provider error never changes a payment's status. The payment is simply retried on schedule.
@@ -158,7 +161,7 @@ exiting. See [setup.md](setup.md#run-locally).
 
 Reading the balance as of block `latest − N + 1` gives exactly the funds with at least N
 confirmations, with no transaction scanning. Balance equals "received" because payment addresses
-are fresh, or reused only after receiving nothing, and watching stops once a payment is final.
+are never reused, and watching stops once a payment is final (24 h after expiry for `expired` ones).
 
 ## Key derivation
 

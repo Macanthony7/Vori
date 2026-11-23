@@ -30,9 +30,9 @@ def tick(conn, now=None, observe=chain_client.observe, send=webhooks.send, limit
     """One pass. Returns (checked, changed, delivered)."""
     now = now or datetime.now(timezone.utc)
     due = conn.execute(
-        "SELECT * FROM payments WHERE status IN ('pending', 'confirming') AND next_check_at <= ? "
-        "ORDER BY next_check_at LIMIT ?",
-        (db.at(now), limit),
+        "SELECT * FROM payments WHERE (status IN ('pending', 'confirming') OR (status = 'expired' AND expires_at > ?)) "
+        "AND next_check_at <= ? ORDER BY next_check_at LIMIT ?",  # expired: late funds, for payments.LATE_WATCH
+        (db.at(now - payments.LATE_WATCH), db.at(now), limit),
     ).fetchall()
     changed = 0
     for p in due:

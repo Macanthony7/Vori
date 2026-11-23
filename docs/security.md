@@ -196,8 +196,8 @@ the frame.
 |---|---|
 | No rate limiting on `POST /accounts`, `POST /payments`, `/auth/*` or `/wallet/balances` | Add per-IP / per-key limits before a public launch (reverse proxy or middleware). Unlimited payment creation also burns provider quota. |
 | Webhook DNS rebinding: a host could resolve to a public IP at the check and a private one at connect | Connect to the already-checked IP (pinning), or send webhooks through an egress proxy that blocks private ranges. |
-| A late payment (more than 24 h after expiry) to a reused address would be credited to the new payment | Rare: the customer pays a day late, to an address nothing else paid. Could be closed by checking the address balance at reuse time. |
-| Funds arriving after `expired` aren't tracked | They're safe in the merchant's wallet. A "paid late" event would make them visible. |
+| Coins sent to an expired payment more than 24 h late aren't noticed automatically | They're safe in the merchant's wallet. "Check all payment addresses" (`POST /wallet/scan`) finds them on demand. |
+| On EVM/Tron, late funds arriving after the merchant already sent an expired payment's earlier coins on are missed until they exceed the old amount | Rare: an underpaid payment whose coins were sent on, then paid again. The coins are safe on the address. Fix by reading transaction lists instead of balances (roadmap: transaction hashes). |
 | BlockCypher counts at most the 200 most recent transactions per address | Fine for payment addresses (one or a few transactions each). |
 | Lost API key for xpub-only accounts (no phrase in our wallet) | Wallet accounts replace it after signing in. xpub-only accounts would need a signature from their own wallet; not built. |
 | xpubs stored in plaintext | Encrypt at rest with a server-held key (protects against DB-only leaks). |
