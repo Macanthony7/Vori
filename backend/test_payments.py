@@ -12,7 +12,8 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 os.environ["GATEWAY_DB"] = os.path.join(tempfile.mkdtemp(), "test.db")
 os.environ["GATEWAY_DB_KEY"] = os.urandom(32).hex()  # never touch backend/.env from tests
-os.environ["GATEWAY_ALLOW_PRIVATE_WEBHOOKS"] = "1"  # so the local receiver below is allowed
+os.environ["GATEWAY_ALLOW_PRIVATE_WEBHOOKS"] = "1"
+os.environ["GATEWAY_TESTNETS"] = "0"  # explicit: backend/.env on a dev machine may turn them on  # so the local receiver below is allowed
 
 from contextlib import closing  # noqa: E402
 
@@ -22,6 +23,7 @@ import db  # noqa: E402
 import payments  # noqa: E402
 import watcher  # noqa: E402
 import webhooks  # noqa: E402
+import rates  # noqa: E402
 from assets import AmountError, from_units, to_units  # noqa: E402
 from chain_client import ChainError  # noqa: E402
 from test_xpubs import CASES  # noqa: E402
@@ -151,6 +153,176 @@ def check_token_send(key):
             setattr(cc, n, f)
 
 
+def check_shop_and_idempotency():
+    """Shop name and logo on the checkout page, return_url, and Idempotency-Key on POST /payments."""
+    import base64
+    import threading
+    from bip_utils import Bip44, Bip44Coins
+    xpub = Bip44.FromSeed(os.urandom(64), Bip44Coins.BITCOIN).Purpose().Coin().Account(0).PublicKey().ToExtended()
+    key = {"Authorization": "Bearer " + api.post("/accounts", json={"xpubs": {"BTC": xpub}}).json()["api_key"]}
+    png = b"\x89PNG\r\n\x1a\n" + os.urandom(200)
+    data = lambda kind, raw: f"data:{kind};base64," + base64.b64encode(raw).decode()
+
+    shop = lambda body: api.put("/accounts/me/shop", json=body, headers=key)
+    assert shop({"name": "x" * 61}).status_code == 400
+    assert shop({"name": "Two\nlines"}).status_code == 400
+    for bad in (data("image/gif", b"GIF89a"), data("image/svg+xml", b"<svg onload=alert(1)>"),
+                data("image/png", b"not a png"), data("image/png", b"\x89PNG\r\n\x1a\n" + b"0" * 100_001),
+                "data:image/png;base64,***", "https://evil.example/logo.png"):
+        r = shop({"name": "Shop", "logo": bad})
+        assert r.status_code == 400, (bad[:40], r.text)
+    assert shop({"name": "  Corner Café  ", "logo": data("image/png", png)}).json() == {"shop_name": "Corner Café", "has_logo": True}
+    assert shop({"name": "Corner Café"}).json()["has_logo"] is True, "logo left out = kept"
+    me = api.get("/accounts/me", headers=key).json()
+    assert me["shop_name"] == "Corner Café" and me["logo"] == data("image/png", png)
+
+    p = api.post("/payments", json={"chain": "BTC", "asset": "BTC", "amount": "0.01",
+                                    "return_url": "https://shop.example/order/7?paid=1"}, headers=key).json()
+    assert p["return_url"] == "https://shop.example/order/7?paid=1"
+    co = api.get(f"/pay/{p['id']}/status").json()
+    assert co["shop_name"] == "Corner Café" and co["logo_url"] == f"/pay/{p['id']}/logo" and co["return_url"] == p["return_url"]
+    logo = api.get(co["logo_url"])
+    assert logo.content == png and logo.headers["content-type"] == "image/png"
+    assert logo.headers["content-security-policy"] == "default-src 'none'; frame-ancestors 'self'" and logo.headers["x-content-type-options"] == "nosniff"
+    assert shop({"name": "", "logo": None}).json() == {"shop_name": None, "has_logo": False}
+    assert api.get(co["logo_url"]).status_code == 404
+    assert api.get(f"/pay/{p['id']}/status").json()["shop_name"] is None
+
+    for bad in ("javascript:alert(1)", "data:text/html,hi", "ftp://shop.example", "http://shop.example/x",
+                "https://user:pw@shop.example", 'https://shop.example/"onmouseover=x', "https://", "x" * 501):
+        r = api.post("/payments", json={"chain": "BTC", "asset": "BTC", "amount": "1", "return_url": bad}, headers=key)
+        assert r.status_code == 400 and "return_url" in r.text, (bad, r.text)
+    assert api.post("/payments", json={"chain": "BTC", "asset": "BTC", "amount": "1", "return_url": "http://localhost:3000/x"},
+                    headers=key).status_code == 201, "http is fine for a shop developed on localhost"
+
+    # Idempotency-Key: retries get the same payment; the same key for another order is refused.
+    order = {"chain": "BTC", "asset": "BTC", "amount": "0.5", "reference": "order-55"}
+    post = lambda body, k: api.post("/payments", json=body, headers={**key, "Idempotency-Key": k})
+    first = post(order, "order-55-try")
+    again = post(order, "order-55-try")
+    assert first.status_code == 201 and again.status_code == 200 and again.headers["idempotent-replayed"] == "true"
+    assert again.json()["id"] == first.json()["id"] and again.json()["address"] == first.json()["address"]
+    r = post({**order, "amount": "5"}, "order-55-try")
+    assert r.status_code == 409 and "different payment" in r.text
+    assert post(order, "another-key").json()["id"] != first.json()["id"]
+    assert post(order, "").status_code == 400 and post(order, "k" * 101).status_code == 400
+    with closing(db.connect()) as conn, conn:
+        conn.execute("UPDATE idempotency_keys SET created_at = '2000-01-01T00:00:00Z' WHERE key = 'order-55-try'")
+    assert post(order, "order-55-try").json()["id"] != first.json()["id"], "keys expire after 24 h"
+
+    # Two identical retries at the same moment: one payment, not two.
+    acct_id = api.get("/accounts/me", headers=key).json()["account_id"]
+    gate, ids = threading.Barrier(2), []
+
+    def racer():
+        with closing(db.connect()) as conn:
+            gate.wait()
+            ids.append(payments.create(conn, acct_id, "BTC", "BTC", "1", idempotency={"key": "race", "hash": "h"})["id"])
+    threads = [threading.Thread(target=racer) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(ids) == 2 and ids[0] == ids[1], ids
+
+
+def check_price_requests():
+    """Prices in USD/EUR: validation, the coins offered, choosing (rate locked, same id), races, expiry."""
+    import threading
+    from decimal import Decimal
+    from bip_utils import Bip44, Bip44Coins
+    seed = os.urandom(64)
+    xpub = lambda coin: Bip44.FromSeed(seed, coin).Purpose().Coin().Account(0).PublicKey().ToExtended()
+    key = {"Authorization": "Bearer " + api.post("/accounts", json={"xpubs": {
+        "BTC": xpub(Bip44Coins.BITCOIN), "TRX": xpub(Bip44Coins.TRON)}}).json()["api_key"]}
+    real_current = rates.current
+    rates.current = lambda currency: {"BTC": Decimal("60000"), "TRX": Decimal("0.30")} if currency == "USD" else {}
+    try:
+        new = lambda body, h=key: api.post("/payments", json=body, headers=h)
+        for bad, why in (({"price": "0", "currency": "USD"}, "price"), ({"price": "1.234", "currency": "USD"}, "price"),
+                         ({"price": "abc", "currency": "USD"}, "price"), ({"price": "-5", "currency": "USD"}, "price"),
+                         ({"price": "NaN", "currency": "USD"}, "price"), ({"price": "2000000", "currency": "USD"}, "price"),
+                         ({"price": "10", "currency": "GBP"}, "currency"), ({"price": "10", "currency": "USD", "accept": []}, "accept"),
+                         ({"price": "10", "currency": "USD", "accept": ["ETH/ETH"]}, "ETH/ETH"),  # no ETH xpub
+                         ({"price": "10", "currency": "USD", "accept": ["BTC/DOGE"]}, "BTC/DOGE"),
+                         ({"price": "10", "currency": "USD", "chain": "BTC", "asset": "BTC", "amount": "1"}, "not both"),
+                         ({"chain": "BTC"}, "required")):
+            r = new(bad)
+            assert r.status_code == 400 and why in r.text, (bad, r.text)
+
+        r = new({"price": "25.00", "currency": "usd", "reference": "order-9", "return_url": "https://shop.example/9"})
+        req = r.json()
+        assert r.status_code == 201 and req["status"] == "choosing" and req["chain"] is None and req["address"] is None, req
+        assert req["price"] == "25.00" and req["currency"] == "USD" and set(req["accept"]) == {"BTC/BTC", "TRX/TRX", "TRX/USDT"}
+        assert api.get(f"/payments/{req['id']}", headers=key).json()["status"] == "choosing"
+        assert req["id"] in [p["id"] for p in api.get("/payments", headers=key).json()["payments"]], "listed while choosing"
+        assert [p["id"] for p in api.get("/payments?status=choosing", headers=key).json()["payments"]] == [req["id"]]
+
+        co = api.get(f"/pay/{req['id']}/status").json()
+        assert co["status"] == "choosing" and "reference" not in co and co["price"] == "25.00", co
+        opts = {(o["chain"], o["asset"]): o for o in co["options"]}
+        assert opts[("BTC", "BTC")] == {"chain": "BTC", "asset": "BTC", "amount": "0.00041667", "available": True}
+        assert opts[("TRX", "TRX")]["amount"] == "83.333334", "rounded up: never less than the price"
+        assert opts[("TRX", "USDT")] == {"chain": "TRX", "asset": "USDT", "amount": None, "available": False}
+
+        choose = lambda body, pid=req["id"]: api.post(f"/pay/{pid}/choose", json=body)
+        assert choose({"chain": "ETH", "asset": "ETH"}).status_code == 400, "not accepted for this payment"
+        assert choose({"chain": "TRX", "asset": "USDT"}).status_code == 503, "no rate: can't be chosen"
+        assert choose({"chain": "BTC", "asset": "BTC"}, "pay_nope").status_code == 404
+        r = choose({"chain": "btc", "asset": "btc"})
+        paid = r.json()
+        assert r.status_code == 200 and paid["id"] == req["id"] and paid["status"] == "pending", paid
+        assert paid["amount"] == "0.00041667" and paid["address"].startswith("1") and paid["rate"] == "60000"
+        assert paid["price"] == "25.00" and paid["return_url"] == "https://shop.example/9"
+        assert choose({"chain": "TRX", "asset": "TRX"}).status_code == 409, "the coin can't be changed afterwards"
+        full = api.get(f"/payments/{req['id']}", headers=key).json()
+        assert full["chain"] == "BTC" and full["reference"] == "order-9" and full["currency"] == "USD"
+        assert Decimal(full["amount"]) * Decimal(full["rate"]) >= Decimal("25")
+        assert [p["id"] for p in api.get("/payments", headers=key).json()["payments"]].count(req["id"]) == 1
+
+        # Two payers (two tabs) choosing at the same moment: one payment, one address used.
+        race = new({"price": "5", "currency": "USD", "accept": ["TRX/TRX"]}).json()
+        with closing(db.connect()) as conn:
+            before = conn.execute("SELECT next_index FROM account_xpubs WHERE chain = 'TRX' AND account_id = "
+                                  "(SELECT account_id FROM price_requests WHERE id = ?)", (race["id"],)).fetchone()[0]
+        gate, results = threading.Barrier(2), []
+
+        def racer():
+            with closing(db.connect()) as conn:
+                gate.wait()
+                try:
+                    results.append(payments.choose(conn, race["id"], "TRX", "TRX")["id"])
+                except payments.ChoiceError as e:
+                    results.append(e.status)
+        threads = [threading.Thread(target=racer) for _ in range(2)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert sorted(results, key=str) == sorted([race["id"], 409], key=str), results
+        with closing(db.connect()) as conn:
+            after = conn.execute("SELECT next_index FROM account_xpubs WHERE chain = 'TRX' AND account_id = "
+                                 "(SELECT account_id FROM price_requests WHERE id = ?)", (race["id"],)).fetchone()[0]
+        assert after == before + 1, "the losing choice didn't use up an address"
+
+        # Not chosen in time.
+        late = new({"price": "5", "currency": "USD"}).json()
+        with closing(db.connect()) as conn, conn:
+            conn.execute("UPDATE price_requests SET expires_at = '2000-01-01T00:00:00Z' WHERE id = ?", (late["id"],))
+        assert api.get(f"/pay/{late['id']}/status").json()["status"] == "expired"
+        assert api.get(f"/pay/{late['id']}/status").json()["options"] == []
+        assert choose({"chain": "BTC", "asset": "BTC"}, late["id"]).status_code == 410
+
+        # Retries of a priced request return the same one.
+        h = {**key, "Idempotency-Key": "priced-1"}
+        a = api.post("/payments", json={"price": "7", "currency": "USD"}, headers=h)
+        b = api.post("/payments", json={"price": "7", "currency": "USD"}, headers=h)
+        assert a.status_code == 201 and b.status_code == 200 and a.json()["id"] == b.json()["id"]
+        assert api.post("/payments", json={"price": "8", "currency": "USD"}, headers=h).status_code == 409
+    finally:
+        rates.current = real_current
+
+
 def check_wallet_login():
     """Signature login (what the wallet frame does), sessions, key rotation, balances."""
     from bip_utils import Bip44, Bip44Changes, Bip44Coins
@@ -162,6 +334,13 @@ def check_wallet_login():
     r = api.post("/accounts", json={"xpubs": {"BTC": xpub}})
     assert r.status_code == 201, r.text
     old_key = {"Authorization": "Bearer " + r.json()["api_key"]}
+
+    # Before any wallet sign-in (like an xpub-only account), the API key may change settings.
+    me = api.get("/accounts/me", headers=old_key).json()
+    assert me["api_key_hint"] == old_key["Authorization"][7:14] and me["settings_need_wallet"] is False, me
+    assert api.get("/accounts/me", headers=old_key).json()["api_key_used_at"], "API key use is recorded"
+    hook = {"url": "https://shop.example/hook"}
+    assert api.put("/accounts/me/webhook", json=hook, headers=old_key).status_code == 200
 
     def sign(challenge, key=main_key):
         return key.sign((app_module.LOGIN_PREFIX + challenge).encode()).hex()  # DER over sha256, like bitcoinjs
@@ -177,10 +356,30 @@ def check_wallet_login():
     assert api.get("/accounts/me", headers=sess).json()["chains"]["BTC"]["first_address"] == address("BTC", xpub, 0)
     assert api.post("/auth/login", json={"xpub": CASES["BTC"][0] + "x", "challenge": "nope", "signature": "00"}).status_code == 401
 
+    # After the first wallet sign-in, a leaked API key can't lock the merchant out or silence webhooks.
+    for method, path, body in (("put", "/accounts/me/webhook", hook), ("delete", "/accounts/me/webhook", None),
+                               ("post", "/accounts/me/api-key", None), ("put", "/accounts/me/shop", {"name": "Evil"})):
+        r = api.request(method.upper(), path, json=body, headers=old_key)
+        assert r.status_code == 403 and "wallet sign-in" in r.text, (path, r.status_code, r.text)
+    assert api.get("/accounts/me", headers=old_key).json()["settings_need_wallet"] is True
+    assert api.get("/payments", headers=old_key).status_code == 200, "the API key still works for payments"
+    assert api.put("/accounts/me/webhook", json=hook, headers=sess).status_code == 200, "the wallet session can"
+    assert api.delete("/accounts/me/webhook", headers=sess).status_code == 204
+
     # Key recovery: a session can replace the API key; the old key stops working.
     new_key = {"Authorization": "Bearer " + api.post("/accounts/me/api-key", headers=sess).json()["api_key"]}
     assert api.get("/accounts/me", headers=old_key).status_code == 401
+    me = api.get("/accounts/me", headers=sess).json()
+    assert me["api_key_hint"] == new_key["Authorization"][7:14] and me["api_key_used_at"] is None, me
     assert api.get("/accounts/me", headers=new_key).status_code == 200
+    # "Last used" is written at most once a minute, not on every request.
+    with closing(db.connect()) as conn:
+        first = conn.execute("SELECT api_key_used_at FROM accounts WHERE id = ?", (me["account_id"],)).fetchone()[0]
+        with conn:
+            conn.execute("UPDATE accounts SET api_key_used_at = '2000-01-01T00:00:00Z' WHERE id = ?", (me["account_id"],))
+        api.get("/accounts/me", headers=new_key)
+        later = conn.execute("SELECT api_key_used_at FROM accounts WHERE id = ?", (me["account_id"],)).fetchone()[0]
+    assert first and later > "2000-01-01T00:00:00Z", "an old timestamp is refreshed"
 
     # Balances: main address always counted, plus funded payment addresses; failures marked incomplete.
     pay = api.post("/payments", json={"chain": "BTC", "asset": "BTC", "amount": "0.01"}, headers=sess).json()
@@ -268,7 +467,8 @@ def check_sealed(secret):
         dump = " | ".join(str(tuple(r)) for t in ("accounts", "account_xpubs")
                           for r in conn.execute(f"SELECT * FROM {t}"))
         assert CASES["BTC"][0] not in dump and secret not in dump, "plaintext secret in the database"
-        row = conn.execute("SELECT xpub, xpub_tag FROM account_xpubs WHERE chain = 'BTC' LIMIT 1").fetchone()
+        row = conn.execute("SELECT xpub, xpub_tag FROM account_xpubs WHERE xpub_tag = ?",  # this test's own account
+                           (db.tag(CASES["BTC"][0]),)).fetchone()
         assert row["xpub"].startswith("v1:") and db.unseal(row["xpub"], "xpub") == CASES["BTC"][0]
         assert row["xpub_tag"] == db.tag(CASES["BTC"][0])
         try:
@@ -356,6 +556,8 @@ def demo():
     assert r.status_code == 200 and "/pay.js" in r.text, r.status_code
 
     check_wallet_login()
+    check_shop_and_idempotency()
+    check_price_requests()
     check_evm_send(key)
     check_token_send(key)
 
@@ -379,6 +581,7 @@ def demo():
             return None  # native ETH/BNB: not searchable
         return ["h" + str(n) + address[-6:] for n in range(1 + min(2, chain.get((c, asset, address), (0, 0))[0] // 10**8))]
 
+    me = api.get("/accounts/me", headers=key).json()["account_id"]  # not assumed to be 1: other test files share the database
     t0 = datetime.now(timezone.utc)
     step = lambda minutes: t0 + timedelta(minutes=minutes)
     with closing(db.connect()) as conn:
@@ -424,7 +627,7 @@ def demo():
         assert status(btc)["status"] == "confirmed", "final states never change"
 
         # Paid in time but never confirmed: watched for 24h after the window, then expired.
-        late = payments.public(payments.create(conn, 1, "ETH", "ETH", "0.5", now=step(40)))
+        late = payments.public(payments.create(conn, me, "ETH", "ETH", "0.5", now=step(40)))
         chain[("ETH", "ETH", late["address"])] = (5 * 10**17, 0)
         run(step(41))
         assert status(late)["status"] == "confirming"
@@ -434,7 +637,7 @@ def demo():
 
         # Webhook retries: receiver failing -> retried later, then delivered.
         Receiver.status, before = 500, len(Receiver.calls)
-        p = payments.public(payments.create(conn, 1, "TRX", "TRX", "1", now=step(2000)))
+        p = payments.public(payments.create(conn, me, "TRX", "TRX", "1", now=step(2000)))
         chain[("TRX", "TRX", p["address"])] = (10**6, 10**6)
         run(step(2001))
         ev = conn.execute("SELECT * FROM webhook_events WHERE payment_id = ?", (p["id"],)).fetchone()
@@ -448,7 +651,7 @@ def demo():
 
         # --- no address reuse; late funds ---------------------------------------------------------------
         # btc2 expired unpaid at step(30). A day later it still isn't handed out again.
-        fresh = payments.create(conn, 1, "BTC", "BTC", "1", now=step(30 + 24 * 60 + 1))
+        fresh = payments.create(conn, me, "BTC", "BTC", "1", now=step(30 + 24 * 60 + 1))
         assert fresh["address"] not in (btc["address"], btc2["address"]), "addresses are never reused"
 
         # Paid after expiry, within 24h: still watched; stays expired, fires payment.paid_late once.
@@ -493,11 +696,27 @@ def demo():
         assert api.post("/wallet/scan", headers=other).json()["found"] == 0  # only your own payments
 
         # Two watchers applying the same transition from the same stale row: one webhook, not two.
-        stale = payments.create(conn, 1, "BTC", "BTC", "1", now=step(6000))
+        stale = payments.create(conn, me, "BTC", "BTC", "1", now=step(6000))
         for _ in range(2):
             payments.apply_observation(conn, stale, 10**8, 10**8, step(6001))
         n = conn.execute("SELECT COUNT(*) FROM webhook_events WHERE payment_id = ?", (stale["id"],)).fetchone()[0]
         assert n == 1, f"duplicate webhooks for one transition: {n}"
+
+    # Test event: signed like a real one, reported back; deliveries list only the account's own events.
+    before = len(Receiver.calls)
+    r = api.post("/accounts/me/webhook/test", headers=key)
+    assert r.status_code == 200 and r.json() == {"delivered": True, "error": None}, r.text
+    sig, body = Receiver.calls[before]
+    assert webhooks.verify(secret, body, sig) and json.loads(body)["event"] == "payment.test"
+    assert json.loads(body)["payment"]["id"].startswith("pay_test_"), "can't be mistaken for a real payment"
+    Receiver.status = 503
+    assert api.post("/accounts/me/webhook/test", headers=key).json() == {"delivered": False, "error": "HTTP 503"}
+    Receiver.status = 200
+    assert api.post("/accounts/me/webhook/test", headers=other).status_code == 400, "no webhook set"
+    d = api.get("/accounts/me/webhook/deliveries", headers=key).json()["deliveries"]
+    assert d and {x["status"] for x in d} <= {"delivered", "queued", "retrying", "failed"}, d
+    assert any(x["event"] == "payment.confirmed" and x["status"] == "delivered" for x in d), d
+    assert api.get("/accounts/me/webhook/deliveries", headers=other).json() == {"deliveries": []}
 
     check_rate_limits(real_limits)
     app_module.LIMITS["payments"] = (2, 60)  # per account: another account has its own budget

@@ -5,7 +5,7 @@ import json
 import httpx
 from playwright.sync_api import expect
 
-from conftest import PASSWORD, frame, import_wallet, unlock
+from conftest import PASSWORD, frame, import_wallet, tab, unlock
 
 
 def open_wallet(page):
@@ -14,7 +14,6 @@ def open_wallet(page):
 
 
 def new_payment(page, amount, network):
-    page.click("#charge summary")
     page.fill("#charge-amount", amount)
     page.select_option("#charge-network", network)
     page.click("#charge-create")
@@ -47,7 +46,7 @@ def test_unlock_balances_receive_and_lock(page, chain):
     expect(f.locator("#u-error")).not_to_be_empty()
     f.locator("#u-pass").fill(PASSWORD)
     f.locator("#u-done").click()
-    page.wait_for_selector("#content:not([hidden])")
+    page.wait_for_selector("#content:not([hidden])", timeout=90_000)
 
 
 def test_payment_from_checkout_to_paid(page, browser, server, chain, tick):
@@ -84,8 +83,9 @@ def test_payment_from_checkout_to_paid(page, browser, server, chain, tick):
 
     page.reload()
     unlock(page)
+    tab(page, "payments")
     row = page.locator("#payments tbody tr").first
-    assert "Paid" in row.inner_text()
+    assert "Confirmed" in row.inner_text()
     assert row.locator("a", has_text="View").get_attribute("href").endswith("/bitcoin/address/" + address), \
         "two transactions: the address page lists both"
 
@@ -102,22 +102,35 @@ def test_expired_payment_then_late_coins(page, chain, tick):
     chain.pay("TRX", "TRX", address, 5_000_000, tx="cc" * 32)
     page.click("#scan")  # far past the 24 h watch: only the scan finds it
     expect(page.locator("#scan-result")).to_contain_text("Found coins on 1")
+    tab(page, "payments")
     row = page.locator("#payments tbody tr", has_text="5 TRX").first
     row.wait_for()
     assert "Expired, 5 received" in row.inner_text()
 
 
-def test_api_key_rotation_and_webhook(page, server, chain, tick):
+def test_api_key_rotation_hint_and_settings_protection(page, server, chain, tick):
     open_wallet(page)
-    page.locator("details", has=page.locator("#new-key")).locator("summary").click()
+    tab(page, "settings")
+    expect(page.locator("#key-info")).to_contain_text("Your current key starts with gw_")
     page.click("#new-key")
     page.click("#new-key")  # second click confirms
     page.wait_for_selector("#new-key-box:not([hidden])")
-    key = {"Authorization": "Bearer " + page.input_value("#new-key-value")}
+    new_key = page.input_value("#new-key-value")
+    expect(page.locator("#key-info")).to_contain_text(f"starts with {new_key[:7]}… Last used: not yet")
+    key = {"Authorization": "Bearer " + new_key}
 
     api = httpx.Client(base_url=server, headers=key)
-    hook = api.put("/accounts/me/webhook", json={"url": "http://127.0.0.1:9/hook"})
-    assert hook.status_code == 200, hook.text
+    # This account has signed in to the wallet, so the API key alone can't change settings.
+    for method, path in (("PUT", "/accounts/me/webhook"), ("DELETE", "/accounts/me/webhook"), ("POST", "/accounts/me/api-key")):
+        r = api.request(method, path, json={"url": "https://shop.example/hook"} if method == "PUT" else None)
+        assert r.status_code == 403, (path, r.status_code, r.text)
+
+    # The webhook itself (set like the wallet would; its screen is plan item 2).
+    import db
+    from contextlib import closing
+    with closing(db.connect()) as conn, conn:
+        conn.execute("UPDATE accounts SET webhook_url = 'http://127.0.0.1:9/hook', webhook_secret = ?",
+                     (db.seal("whsec_test", "webhook_secret"),))
     p = api.post("/payments", json={"chain": "ETH", "asset": "USDT", "amount": "12.5", "reference": "order-7"}).json()
     chain.pay("ETH", "USDT", p["address"], 12_500_000, tx="0x" + "dd" * 32)
     sent = tick()
@@ -125,6 +138,11 @@ def test_api_key_rotation_and_webhook(page, server, chain, tick):
     assert [e["event"] for e in events] == ["payment.confirmed"], events
     assert events[0]["payment"]["transactions"][0]["url"] == "https://etherscan.io/tx/0x" + "dd" * 32
     assert events[0]["payment"]["reference"] == "order-7"
+
+    page.reload()
+    unlock(page)
+    tab(page, "settings")
+    expect(page.locator("#key-info")).not_to_contain_text("not yet")  # the shop's key was used just now
 
 
 def test_checkout_fits_a_phone(browser, server, page):

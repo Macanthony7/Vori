@@ -40,8 +40,108 @@
         return Math.floor((Date.parse(payment.expires_at) - (Date.now() + clockOffset)) / 1000);
     }
 
+    function money(value, currency) {
+        try {
+            return new Intl.NumberFormat(undefined, { style: "currency", currency: currency }).format(Number(value));
+        } catch (e) {
+            return value + " " + currency;
+        }
+    }
+
+    function renderShop(p) {
+        show($("shop"), !!(p.shop_name || p.logo_url));
+        $("shop-name").textContent = p.shop_name || "the merchant";
+        if (p.logo_url && !$("shop-logo").src) $("shop-logo").src = p.logo_url;
+        show($("shop-logo"), !!p.logo_url);
+    }
+
+    // A payment priced in USD/EUR: the payer picks the coin first.
+    var drawnOptions = "";
+    function renderChoose(p) {
+        renderShop(p);
+        show($("payment"), false);
+        show($("choose"), true);
+        $("price").textContent = money(p.price, p.currency);
+        var expired = p.status === "expired";
+        show($("choose-title"), !expired);
+        show($("choose-note"), !expired);
+        if (expired) {
+            $("options").textContent = "";
+            $("choose-error").textContent = "This payment expired before a coin was chosen. Ask the merchant for a new one.";
+            return false;
+        }
+        var key = JSON.stringify(p.options);
+        if (key !== drawnOptions) {  // rates refresh while waiting; redraw only on change (keeps focus)
+            drawnOptions = key;
+            $("options").textContent = "";
+            p.options.forEach(function (o) {
+                var b = document.createElement("button");
+                b.type = "button";
+                b.className = "secondary";
+                b.disabled = !o.available;
+                var name = document.createElement("span");
+                var net = document.createElement("span");
+                net.className = "mark";
+                net.textContent = NETWORKS[o.chain + "/" + o.asset] || o.chain;
+                name.append(o.asset + " on ", net);
+                var amount = document.createElement("span");
+                amount.textContent = o.available ? o.amount + " " + o.asset : "price unavailable";
+                b.append(name, amount);
+                b.addEventListener("click", function () { choose(o); });
+                $("options").appendChild(b);
+            });
+        }
+        return true;
+    }
+
+    function choose(o) {
+        $("choose-error").textContent = "";
+        document.querySelectorAll("#options button").forEach(function (b) { b.disabled = true; });
+        fetch("/pay/" + encodeURIComponent(id) + "/choose", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ chain: o.chain, asset: o.asset })
+        }).then(function (r) {
+            return r.json().then(function (data) {
+                if (!r.ok) throw new Error((data.detail && data.detail.error) || "HTTP " + r.status);
+                return data;
+            });
+        }).then(function (p) {
+            payment = p;
+            render();
+        }).catch(function (err) {
+            $("choose-error").textContent = String(err.message || err);
+            drawnOptions = "";  // redraw (re-enables what's available) on the next poll
+        });
+    }
+
+    // The hallmark strip: Waiting -> Seen -> Confirmed, each mark struck once when its stage is reached.
+    var STAGES = { pending: 0, confirming: 1, confirmed: 2 };
+    var lastStage = -1;
+    function renderProgress(p) {
+        var marks = document.querySelectorAll("#progress .mark");
+        var stage = p.status === "expired" ? -1 : STAGES[p.status];
+        marks.forEach(function (m, i) {
+            m.className = "mark";
+            m.textContent = ["Waiting", "Seen", "Confirmed"][i];
+            if (p.status === "expired") {
+                if (i === 0) { m.classList.add("bad"); m.textContent = "Expired"; }
+                return;
+            }
+            if (i < stage || (i === 2 && stage === 2)) m.classList.add("done");
+            else if (i === stage) m.classList.add("now");
+            if (i === 2 && stage === 2) m.classList.add("proven");
+            var justReached = lastStage >= 0 && i > lastStage && i <= stage; // not on first load: only live changes strike
+            if (justReached) m.classList.add("struck");
+        });
+        lastStage = stage;
+    }
+
     function render() {
-        var p = payment, asset = p.asset, left = secondsLeft();
+        var p = payment;
+        if (!p.chain) return renderChoose(p);
+        show($("choose"), false);
+        show($("payment"), true);
+        var asset = p.asset, left = secondsLeft();
         var received = p.amount_received !== "0";
         var open = p.status === "pending" || p.status === "confirming";
         var label = NETWORKS[p.chain + "/" + p.asset] || p.chain;
@@ -80,13 +180,23 @@
         $("tx-link").firstElementChild.href = p.address_url;
         show($("tx-link"), received);
 
+        renderProgress(p);
+        // Who's being paid, and the way back to the shop once there's nothing left to do here.
+        renderShop(p);
+        if (p.price) $("heading").textContent += " (" + money(p.price, p.currency) + ")";
+        if (p.return_url) {
+            $("back-link").href = p.return_url;
+            $("back-link").textContent = "Back to " + (p.shop_name || "the shop");
+        }
+        show($("back"), !!p.return_url && p.status !== "pending");
+
         // Only offer the address while sending is still useful.
         show($("pay-box"), p.status === "pending" && left > 0);
         if (p.status === "pending" && left > 0) {
             var scheme = URI_SCHEME[p.chain];
             var qrText = scheme ? scheme + ":" + p.address + "?amount=" + p.amount_due : p.address;
             if (qrText !== drawnQr) {
-                $("qr").replaceChildren(kjua({ text: qrText, render: "canvas", size: 220, ecLevel: "M", fill: "#000", back: "#fff" }));
+                $("qr").replaceChildren(kjua({ text: qrText, render: "canvas", size: 240, ecLevel: "M", fill: "#000", back: "#fff" }));
                 drawnQr = qrText;
             }
             var m = Math.floor(left / 60), s = left % 60;
@@ -106,7 +216,6 @@
                 clockOffset = Date.parse(p.server_time) - Date.now();
                 payment = p;
                 show($("loading"), false);
-                show($("payment"), true);
                 if (render()) setTimeout(load, POLL_MS);
             })
             .catch(function (err) {

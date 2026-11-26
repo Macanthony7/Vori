@@ -4,7 +4,11 @@ Run from backend/:  python -m uvicorn app:app --port 8000
 Payments are watched by a separate process: python watcher.py
 Docs: ../docs/api.md
 """
+import base64
+import binascii
 import hashlib
+import hmac
+import json
 import os
 import secrets
 import sqlite3
@@ -18,6 +22,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, Header, HTTPException, Request, Response
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from bip_utils import Base58Decoder
@@ -28,6 +33,7 @@ import chain_client
 import db
 import payments
 from assets import ASSETS, EVM_CHAINS, TRON_CHAINS, AmountError, from_units
+import webhooks
 from webhooks import WebhookError, check_url
 from xpubs import CHAINS, XpubError, address, normalize, public_key
 
@@ -43,13 +49,18 @@ def hash_key(api_key):
 
 
 app = FastAPI(title="Payment gateway", docs_url="/api/docs", redoc_url=None)
+# Compress text and the signing engine on the way out: the first Send loads ~21 MB (core_proto.js 10.8 MB,
+# wallet-core.wasm 10.4 MB), ~4.7 MB gzipped. The frame checks SHA-256 of the decompressed bytes, so the pins
+# still hold. Behind Caddy, its `encode gzip` does the same (deploy/Caddyfile).
+# ponytail: compressed per request; serve pre-compressed files if CPU ever matters.
+app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=6)
 
 
 @app.middleware("http")
 async def security_headers(request: Request, call_next):
     response = await call_next(request)
     # Only our own pages may frame our pages (protects the seed frame and its postMessage).
-    response.headers["Content-Security-Policy"] = "frame-ancestors 'self'"
+    response.headers.setdefault("Content-Security-Policy", "frame-ancestors 'self'")  # unless a route set a stricter one
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "no-referrer"
     if request.url.path.startswith(("/accounts", "/payments", "/pay/", "/auth", "/wallet")):
@@ -73,6 +84,8 @@ LIMITS = {                       # bucket: (requests, per seconds)
     "wallet": (30, 60),          # balances and send prepare/relay, per account
     "wallet_tx": (60, 60),       # GET /wallet/tx: the page polls every 3 s while top-ups land
     "scan": (1, 60),             # POST /wallet/scan, per account
+    "webhook_test": (6, 60),     # POST /accounts/me/webhook/test, per account (calls the shop's server)
+    "hook": (240, 60),           # BlockCypher callbacks, per IP (it retries a few times per event)
 }
 # Behind a reverse proxy every request comes from the proxy's IP. Set GATEWAY_TRUST_PROXY=1 only when
 # a proxy you run sets X-Forwarded-For; otherwise visitors could pick their own "IP".
@@ -137,7 +150,8 @@ def create_account(body: NewAccount, request: Request):
     try:
         with closing(db.connect()) as conn, conn:  # `with conn` = one transaction
             account_id = conn.execute(
-                "INSERT INTO accounts (api_key_hash, created_at) VALUES (?, ?)", (hash_key(api_key), created)
+                "INSERT INTO accounts (api_key_hash, api_key_hint, created_at) VALUES (?, ?, ?)",
+                (hash_key(api_key), key_hint(api_key), created)
             ).lastrowid
             conn.executemany(
                 "INSERT INTO account_xpubs (account_id, chain, xpub, xpub_tag, next_index) VALUES (?, ?, ?, ?, ?)",
@@ -155,6 +169,11 @@ def create_account(body: NewAccount, request: Request):
     }
 
 
+def key_hint(api_key):
+    """First 7 characters ("gw_" + 4): enough to tell keys apart, far too little to guess one (256 bits)."""
+    return api_key[:7]
+
+
 def account_for(authorization):
     """Bearer API key ("gw_...") or wallet session token ("gws_...", from POST /auth/login)."""
     scheme, _, key = (authorization or "").partition(" ")
@@ -168,9 +187,26 @@ def account_for(authorization):
                    WHERE s.token_hash = ? AND s.expires_at > ?""", (hash_key(key), db.now())).fetchone()
         else:
             row = conn.execute("SELECT * FROM accounts WHERE api_key_hash = ?", (hash_key(key),)).fetchone()
+            now = datetime.now(timezone.utc)
+            if row and (row["api_key_used_at"] or "") < db.at(now - timedelta(minutes=1)):
+                with conn:  # "last used", without a database write on every request
+                    conn.execute("UPDATE accounts SET api_key_used_at = ? WHERE id = ?", (db.at(now), row["id"]))
     if not row:
         fail(401, "invalid or expired API key / session")
     return row
+
+
+def account_for_settings(authorization):
+    """For changes a leaked API key must not make: the webhook and the API key itself.
+
+    Once an account has signed in to the wallet, these need a wallet session (a signature by the
+    wallet's key), so a stolen API key can only create and read payments. Accounts that never signed in
+    (xpub-only, no phrase in our wallet) can still use the API key. Docs: docs/security.md#api-keys
+    """
+    acct = account_for(authorization)
+    if acct["wallet_login_at"] and not (authorization or "").split()[-1].startswith("gws_"):
+        fail(403, "this needs the wallet sign-in: open your wallet to change the webhook or the API key")
+    return acct
 
 
 @app.get("/accounts/me")
@@ -183,6 +219,12 @@ def me(authorization: str = Header(None)):
         "plan": acct["plan"],
         "plan_expires_at": acct["plan_expires_at"],
         "webhook_url": acct["webhook_url"],
+        "api_key_hint": acct["api_key_hint"],
+        "api_key_used_at": acct["api_key_used_at"],
+        "settings_need_wallet": bool(acct["wallet_login_at"]),
+        "shop_name": acct["shop_name"],
+        "has_logo": bool(acct["shop_logo"]),
+        "logo": f"data:{acct['shop_logo_type']};base64,{acct['shop_logo']}" if acct["shop_logo"] else None,
         "chains": first_addresses({r["chain"]: db.unseal(r["xpub"], "xpub") for r in rows}),
     }
 
@@ -193,7 +235,7 @@ class WebhookSettings(BaseModel):
 
 @app.put("/accounts/me/webhook")
 def set_webhook(body: WebhookSettings, authorization: str = Header(None)):
-    acct = account_for(authorization)
+    acct = account_for_settings(authorization)
     try:
         url = check_url(body.url)
     except WebhookError as e:
@@ -206,19 +248,103 @@ def set_webhook(body: WebhookSettings, authorization: str = Header(None)):
 
 @app.delete("/accounts/me/webhook", status_code=204)
 def delete_webhook(authorization: str = Header(None)):
-    acct = account_for(authorization)
+    acct = account_for_settings(authorization)
     with closing(db.connect()) as conn, conn:
         conn.execute("UPDATE accounts SET webhook_url = NULL, webhook_secret = NULL WHERE id = ?", (acct["id"],))
     return Response(status_code=204)
 
 
+# --- Shop name and logo (checkout page) -----------------------------------------------------------
+LOGO_MAX = 100_000  # bytes
+LOGO_TYPES = {"image/png": b"\x89PNG\r\n\x1a\n", "image/jpeg": b"\xff\xd8\xff"}  # type -> file signature
+
+
+class ShopSettings(BaseModel):
+    name: Optional[str] = None    # null or "" clears it
+    logo: Optional[str] = None    # data:image/png;base64,... ; null or "" removes it; leave out to keep it
+
+
+@app.put("/accounts/me/shop")
+def set_shop(body: ShopSettings, authorization: str = Header(None)):
+    """What payers see on the checkout page. Same protection as the webhook: a leaked API key mustn't be
+    able to rename the shop payers think they're paying."""
+    acct = account_for_settings(authorization)
+    name = (body.name or "").strip() or None
+    if name and (len(name) > 60 or any(ord(c) < 32 for c in name)):
+        fail(400, "shop name must be at most 60 characters, on one line")
+    updates = {"shop_name": name}
+    if "logo" in body.model_fields_set:
+        updates.update(shop_logo=None, shop_logo_type=None)
+        if body.logo:
+            head, _, data = body.logo.partition(",")
+            kind = head.removeprefix("data:").removesuffix(";base64")
+            if kind not in LOGO_TYPES or not head.endswith(";base64"):
+                fail(400, "logo must be a PNG or JPEG image")
+            try:
+                raw = base64.b64decode(data, validate=True)
+            except (binascii.Error, ValueError):
+                fail(400, "logo isn't valid base64")
+            if len(raw) > LOGO_MAX:
+                fail(400, f"logo must be at most {LOGO_MAX // 1000} KB")
+            if not raw.startswith(LOGO_TYPES[kind]):
+                fail(400, "logo isn't a real PNG or JPEG file")
+            updates.update(shop_logo=base64.b64encode(raw).decode(), shop_logo_type=kind)
+    with closing(db.connect()) as conn, conn:
+        conn.execute("UPDATE accounts SET " + ", ".join(f"{k} = ?" for k in updates) + " WHERE id = ?",
+                     (*updates.values(), acct["id"]))
+    return {"shop_name": name, "has_logo": bool(updates.get("shop_logo", acct["shop_logo"]))}
+
+
+# What a test event carries: the shape of a real payment, clearly not one ("pay_test_", reference).
+SAMPLE_PAYMENT = {
+    "id": "pay_test_0000000000000000000000", "status": "confirmed", "chain": "BTC", "asset": "BTC",
+    "address": "1BoatSLRHtKNngkdXEeobR76b53LETtpyT", "amount": "0.001", "amount_received": "0.001",
+    "amount_confirmed": "0.001", "confirmations_required": 2, "token_contract": None,
+    "reference": "test-event", "created_at": "2026-01-01T00:00:00Z", "expires_at": "2026-01-01T00:30:00Z",
+    "confirmed_at": "2026-01-01T00:12:00Z", "transactions": [], "address_url": "",
+    "checkout_url": "",
+}
+
+
+@app.post("/accounts/me/webhook/test")
+def webhook_test(authorization: str = Header(None)):
+    """Send a signed `payment.test` event to the webhook now and report how the shop answered."""
+    acct = account_for_settings(authorization)
+    rate_limit("webhook_test", acct["id"])
+    if not acct["webhook_url"]:
+        fail(400, "set a webhook URL first")
+    body = json.dumps({"event": "payment.test", "payment": SAMPLE_PAYMENT}, separators=(",", ":"), sort_keys=True)
+    error = webhooks.send(acct["webhook_url"], db.unseal(acct["webhook_secret"], "webhook_secret"), body)
+    return {"delivered": error is None, "error": error}
+
+
+@app.get("/accounts/me/webhook/deliveries")
+def webhook_deliveries(authorization: str = Header(None)):
+    """The account's 20 most recent webhook events and how their delivery went."""
+    acct = account_for(authorization)
+    with closing(db.connect()) as conn:
+        rows = conn.execute(
+            """SELECT id, payment_id, event, attempts, delivered_at, next_attempt_at, last_error FROM webhook_events
+               WHERE account_id = ? ORDER BY id DESC LIMIT 20""", (acct["id"],)).fetchall()
+    def status(r):
+        if r["delivered_at"]:
+            return "delivered"
+        if r["next_attempt_at"]:
+            return "retrying" if r["attempts"] else "queued"
+        return "failed"  # gave up after the last retry, or the webhook was removed
+    return {"deliveries": [{"id": r["id"], "payment_id": r["payment_id"], "event": r["event"], "status": status(r),
+                            "attempts": r["attempts"], "delivered_at": r["delivered_at"],
+                            "next_attempt_at": r["next_attempt_at"], "last_error": r["last_error"]} for r in rows]}
+
+
 @app.post("/accounts/me/api-key")
 def rotate_api_key(authorization: str = Header(None)):
     """New API key; the old one stops working. With a wallet session this is key recovery."""
-    acct = account_for(authorization)
+    acct = account_for_settings(authorization)
     api_key = "gw_" + secrets.token_urlsafe(32)
     with closing(db.connect()) as conn, conn:
-        conn.execute("UPDATE accounts SET api_key_hash = ? WHERE id = ?", (hash_key(api_key), acct["id"]))
+        conn.execute("UPDATE accounts SET api_key_hash = ?, api_key_hint = ?, api_key_used_at = NULL WHERE id = ?",
+                     (hash_key(api_key), key_hint(api_key), acct["id"]))
     return {"api_key": api_key}
 
 
@@ -278,6 +404,8 @@ def login(body: Login, request: Request):
         conn.execute("DELETE FROM sessions WHERE expires_at < ?", (db.at(now),))
         conn.execute("INSERT INTO sessions (token_hash, account_id, expires_at) VALUES (?, ?, ?)",
                      (hash_key(token), row["account_id"], db.at(now + SESSION_TTL)))
+        conn.execute("UPDATE accounts SET wallet_login_at = ? WHERE id = ? AND wallet_login_at IS NULL",
+                     (db.at(now), row["account_id"]))
     return {"token": token, "account_id": row["account_id"], "expires_at": db.at(now + SESSION_TTL)}
 
 
@@ -544,32 +672,64 @@ def tx_status(chain: str, tx_hash: str, authorization: str = Header(None)):
 # --- Payments -------------------------------------------------------------------------------------
 
 class NewPayment(BaseModel):
-    chain: str
-    asset: str
-    amount: str
+    # Either an amount in a coin (chain + asset + amount), or a price (price + currency [+ accept]):
+    chain: Optional[str] = None
+    asset: Optional[str] = None
+    amount: Optional[str] = None
+    price: Optional[str] = None
+    currency: Optional[str] = None
+    accept: Optional[list] = None
     reference: Optional[str] = None
+    return_url: Optional[str] = None
 
 
 @app.post("/payments", status_code=201)
-def create_payment(body: NewPayment, authorization: str = Header(None)):
+def create_payment(body: NewPayment, response: Response, authorization: str = Header(None),
+                   idempotency_key: Optional[str] = Header(None)):
     acct = account_for(authorization)
     rate_limit("payments", acct["id"])
+    idem = None
+    if idempotency_key is not None:
+        if not 1 <= len(idempotency_key) <= 100:
+            fail(400, "Idempotency-Key must be 1 to 100 characters")
+        digest = hashlib.sha256(json.dumps(body.model_dump(), sort_keys=True).encode()).hexdigest()
+        idem = {"key": idempotency_key, "hash": digest}
+    priced = body.price is not None or body.currency is not None or body.accept is not None
+    if priced and (body.chain or body.asset or body.amount):
+        fail(400, "send either chain + asset + amount, or price + currency (the payer picks the coin), not both")
+    if not priced and not (body.chain and body.asset and body.amount):
+        fail(400, "chain, asset and amount are required (or price and currency)")
     with closing(db.connect()) as conn:
         try:
-            p = payments.create(conn, acct["id"], body.chain, body.asset, body.amount, body.reference)
+            if priced:
+                p = payments.create_request(conn, acct["id"], body.price, body.currency, body.accept, body.reference,
+                                            return_url=body.return_url, idempotency=idem)
+            else:
+                p = payments.create(conn, acct["id"], body.chain, body.asset, body.amount, body.reference,
+                                    return_url=body.return_url, idempotency=idem)
+        except payments.IdempotencyConflict as e:
+            fail(409, str(e))
         except (AmountError, payments.PaymentError) as e:
             fail(400, str(e))
-    return payments.public(p)
+    if idem and idem.get("replayed"):
+        response.status_code = 200  # the payment from the first request with this key
+        response.headers["Idempotent-Replayed"] = "true"
+    return view(p)
+
+
+def view(row):
+    """API view of a payment, or of a price request while no coin is chosen."""
+    return payments.public(row) if "address" in row.keys() else payments.public_request(row)
 
 
 @app.get("/payments/{payment_id}")
 def get_payment(payment_id: str, authorization: str = Header(None)):
     acct = account_for(authorization)
     with closing(db.connect()) as conn:
-        p = payments.get(conn, acct["id"], payment_id)
+        p = payments.lookup_any(conn, acct["id"], payment_id)
     if not p:
         fail(404, "payment not found")
-    return payments.public(p)
+    return view(p)
 
 
 @app.get("/payments")
@@ -581,7 +741,15 @@ def list_payments(status: Optional[str] = None, limit: int = 50, authorization: 
         query, params = query + " AND status = ?", params + [status]
     with closing(db.connect()) as conn:
         rows = conn.execute(query + " ORDER BY created_at DESC, rowid DESC LIMIT ?", (*params, limit)).fetchall()
-    return {"payments": [payments.public(p) for p in rows]}
+        # Price requests still waiting for the payer to pick a coin (once picked, they're payments above).
+        waiting = conn.execute("""SELECT * FROM price_requests r WHERE account_id = ?
+                                  AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.id = r.id)
+                                  ORDER BY created_at DESC LIMIT ?""", (acct["id"], limit)).fetchall()
+    out = [payments.public(p) for p in rows] + [payments.public_request(r) for r in waiting]
+    if status:
+        out = [p for p in out if p["status"] == status]
+    out.sort(key=lambda p: p["created_at"], reverse=True)  # same "YYYY-MM-DDTHH:MM:SSZ" format: sorts as text
+    return {"payments": out[:limit]}
 
 
 # --- Checkout (public, for the payer) ---------------------------------------------------------------
@@ -591,9 +759,70 @@ def checkout_status(payment_id: str, request: Request):
     rate_limit("checkout", client_ip(request))  # ids are 128-bit random; this only stops floods
     with closing(db.connect()) as conn:
         p = conn.execute("SELECT * FROM payments WHERE id = ?", (payment_id,)).fetchone()
-    if not p:
+        req = None if p else conn.execute("SELECT * FROM price_requests WHERE id = ?", (payment_id,)).fetchone()
+        owner = p or req
+        shop = owner and conn.execute("SELECT shop_name, shop_logo IS NOT NULL AS logo FROM accounts WHERE id = ?",
+                                      (owner["account_id"],)).fetchone()
+    if not owner:
         fail(404, "payment not found")
-    return payments.checkout(p)
+    return {**checkout_view(p, req), "shop_name": shop["shop_name"],
+            "logo_url": f"/pay/{payment_id}/logo" if shop["logo"] else None}
+
+
+def checkout_view(p, req):
+    if p:
+        return payments.checkout(p)
+    now = datetime.now(timezone.utc)
+    out = {k: v for k, v in payments.public_request(req, now).items() if k not in ("reference", "checkout_url")}
+    out["options"] = payments.options(req) if out["status"] == "choosing" else []
+    out["server_time"] = db.at(now)
+    return out
+
+
+class Choice(BaseModel):
+    chain: str
+    asset: str
+
+
+@app.post("/pay/{payment_id}/choose")
+def checkout_choose(payment_id: str, body: Choice, request: Request):
+    """The payer picks a coin for a payment priced in USD/EUR: the rate is locked now, the address shown."""
+    rate_limit("checkout", client_ip(request))
+    with closing(db.connect()) as conn:
+        try:
+            payments.choose(conn, payment_id, body.chain, body.asset)
+        except payments.ChoiceError as e:
+            fail(e.status, str(e))
+        except (AmountError, payments.PaymentError) as e:
+            fail(400, str(e))
+    return checkout_status(payment_id, request)
+
+
+@app.get("/pay/{payment_id}/logo", include_in_schema=False)
+def checkout_logo(payment_id: str, request: Request):
+    """The shop's logo, served from our domain so the checkout page loads nothing from elsewhere."""
+    rate_limit("checkout", client_ip(request))
+    with closing(db.connect()) as conn:
+        row = conn.execute("""SELECT a.shop_logo, a.shop_logo_type FROM accounts a WHERE a.id IN
+                              (SELECT account_id FROM payments WHERE id = ? UNION SELECT account_id FROM price_requests WHERE id = ?)""",
+                           (payment_id, payment_id)).fetchone()
+    if not row or not row["shop_logo"]:
+        fail(404, "no logo")
+    return Response(base64.b64decode(row["shop_logo"]), media_type=row["shop_logo_type"],
+                    headers={"Content-Security-Policy": "default-src 'none'; frame-ancestors 'self'"})
+
+
+@app.post("/hooks/blockcypher/{payment_id}", include_in_schema=False)
+def blockcypher_hook(payment_id: str, request: Request, t: str = ""):
+    """BlockCypher says something happened on this payment's address. Never trusted as proof: anyone can
+    call this URL. It only makes the watcher check that payment on its next pass (every 5 s)."""
+    rate_limit("hook", client_ip(request))
+    if not hmac.compare_digest(t, payments.hook_token(payment_id)):
+        fail(404, "not found")
+    with closing(db.connect()) as conn, conn:
+        conn.execute("UPDATE payments SET next_check_at = ? WHERE id = ? AND status IN ('pending', 'confirming', 'expired')",
+                     (db.now(), payment_id))
+    return Response(status_code=204)
 
 
 @app.get("/pay/{payment_id}", include_in_schema=False)

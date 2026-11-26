@@ -47,7 +47,8 @@ fill it in. Never commit `.env`.
 
 | Variable | Used for | Notes |
 |---|---|---|
-| `BLOCKCYPHER_TOKEN` | BTC, LTC, DOGE | Optional. Without a token, BlockCypher allows ~100 requests/hour, enough for only a handful of payments. |
+| `BLOCKCYPHER_TOKEN` | BTC, LTC, DOGE | Optional. Without a token, BlockCypher allows ~100 requests/hour, enough for only a handful of payments. With a token and an `https://` `GATEWAY_PUBLIC_URL`, BTC/LTC/DOGE payments also get push hooks, so they're polled every 10 min instead of every 60 s ([roadmap.md](roadmap.md#blockcypher-push-hooks)). |
+| `GATEWAY_BLOCKCYPHER_HOOKS` | watcher | `0` = no push hooks even with a token (polling only). |
 | `ETH_RPC_URL` | ETH, USDT-ERC20 | Full JSON-RPC URL with the key, e.g. `https://eth-mainnet.g.alchemy.com/v2/<key>` |
 | `BSC_RPC_URL` | BNB, USDT-BEP20 | e.g. `https://rpc.ankr.com/bsc/<key>` |
 | `TRONGRID_URL` | TRX, USDT-TRC20 | Default `https://api.trongrid.io` |

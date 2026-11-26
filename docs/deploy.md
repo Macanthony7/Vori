@@ -19,7 +19,7 @@ flowchart LR
 |---|---|
 | A VPS | Ubuntu 24.04, 1 vCPU, 1 GB RAM is plenty (Hetzner CX22, DigitalOcean, Vultr: about $5/month). Add your SSH key when creating it. |
 | A domain name | For testing, a free [DuckDNS](https://www.duckdns.org) subdomain (`yourname-pay.duckdns.org`) works. For production, buy a real domain (Cloudflare, Porkbun, Namecheap: about $10/year). |
-| Provider keys | Mainnet needs real ones: `ETH_RPC_URL` (Alchemy free plan), `BSC_RPC_URL` (Ankr or another BSC RPC), `BLOCKCYPHER_TOKEN` (free account), `TRONGRID_API_KEY` (free). |
+| Provider keys | Mainnet needs real ones: `ETH_RPC_URL` (Alchemy free plan), `BSC_RPC_URL` (Ankr or another BSC RPC), `BLOCKCYPHER_TOKEN` (free account; also turns on push hooks for BTC/LTC/DOGE, which BlockCypher calls at `https://YOUR_DOMAIN/hooks/blockcypher/…`), `TRONGRID_API_KEY` (free). |
 | A wallet for the test | Use a **new** recovery phrase on the staging server, not your Sepolia/Nile test one and not your personal wallet. |
 
 ## 1. Point the domain at the server
@@ -166,6 +166,7 @@ holds the coins, but a mistake in sending them back could still send them somewh
    payment address it includes about 1.1 TRX to activate it.
 4. **Send** the TRX and ETH back too. Each Send shows the fee before you confirm.
 5. Check on the explorers that everything arrived where you sent it.
+6. If you paid BTC: the watcher log (`journalctl -u gateway-watcher`) shows no "no BlockCypher hook" warning for it, and the payment turned Seen within seconds instead of a minute: the push hook works.
 
 Tell me how each step went. If anything looks wrong, stop and send me what the page showed.
 

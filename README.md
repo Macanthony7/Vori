@@ -48,6 +48,13 @@ backend/
 | Signed webhooks with retries | Built and tested |
 | Wallet vault: password-encrypted phrase on the device, unlock / auto-lock (`wallet.html`) | Built; E2E tested (Lock bug fixed) |
 | Test environment: `run_tests.py`, E2E (Playwright), 94% backend coverage, CI | Built |
+| API key safety: settings need the wallet sign-in; key hint and last use | Built and tested (backend + E2E) |
+| Webhooks and Integration screens, tested code samples (Python, Node.js, PHP, curl) | Built and tested (backend + E2E) |
+| Shop name and logo on checkout, return link, Idempotency-Key | Built and tested (backend + E2E) |
+| Prices in USD/EUR, the payer picks the coin (live rates from Kraken + Coinbase) | Built and tested (backend + E2E); rates checked live |
+| Redesign: one design system, wallet tabs, hallmark progress on checkout, keyboard and 320 px support | Built and tested (E2E incl. screenshot comparison) |
+| BlockCypher push hooks; gzip (signing engine 21 MB to 4.7 MB) | Built and tested; hooks not yet tried against the live API |
+| Deploy and the mainnet test | Waiting for the owner ([docs/deploy.md](docs/deploy.md)) |
 | Checkout page `/pay/{id}` with QR, countdown and live status | Built; API tested, page checked in the preview browser (desktop + mobile) |
 | Wallet dashboard: live balances, Receive, recent payments, sign-in by signature, API key recovery | Built and tested; checked in the preview browser (signatures from the real frame code verified by the server) |
 | Send BTC / LTC / DOGE, signed in the offline frame (Trust Wallet Core) | Built and tested; signatures verified independently; not yet tried with real funds or inside Chrome's sandboxed frame |

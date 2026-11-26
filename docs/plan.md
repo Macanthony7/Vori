@@ -9,12 +9,12 @@ Nothing counts as done until `python run_tests.py` passes and its docs are updat
 | # | Item | Size | Status |
 |---|---|---|---|
 | 0 | Test environment: E2E, coverage, CI | Medium | ✅ |
-| 1 | API key safety | Small | ⬜ |
-| 2 | Dashboard settings: webhooks and integration | Medium | ⬜ |
-| 3 | Checkout for shops: name, logo, return link, duplicate protection | Medium | ⬜ |
-| 4 | Customer picks the coin; prices in USD/EUR | Large | ⬜ |
-| 5 | UI/UX redesign: sign-up, wallet, checkout | Large | ⬜ |
-| 6 | Launch prep: BlockCypher hooks, smaller signing engine, deploy, mainnet test | Medium | ⬜ |
+| 1 | API key safety | Small | ✅ |
+| 2 | Dashboard settings: webhooks and integration | Medium | ✅ |
+| 3 | Checkout for shops: name, logo, return link, duplicate protection | Medium | ✅ |
+| 4 | Customer picks the coin; prices in USD/EUR | Large | ✅ |
+| 5 | UI/UX redesign: sign-up, wallet, checkout | Large | ✅ |
+| 6 | Launch prep: BlockCypher hooks, smaller signing engine, deploy, mainnet test | Medium | 🔄 (code done; deploy and mainnet test are yours) |
 
 Decisions still open are marked **Decide:** and get settled before the item starts.
 
@@ -31,7 +31,12 @@ unlocked keys stayed in its memory (fixed; `test_unlock_balances_receive_and_loc
 
 ---
 
-## 1. API key safety
+## 1. API key safety ✅
+
+Built as planned. **Decided:** (a). The rule is "once the account has signed in to the wallet": from
+the first wallet sign-in on, settings need a session; accounts that never sign in (xpub-only) keep
+using the API key. Tests: `check_wallet_login` in `backend/test_payments.py`,
+`test_api_key_rotation_hint_and_settings_protection` in `tests/e2e/test_wallet_checkout.py`.
 
 A leaked API key should only be able to create and read payments, never lock the merchant out or
 silence their notifications.
@@ -51,7 +56,12 @@ wallet's key (Electrum and Sparrow can sign messages). Proposal: (a) now, (b) la
   `last_used_at` updates on use but not more than once a minute (no write on every request).
 - E2E: the dashboard shows the key prefix and "last used"; rotating still works from the dashboard.
 
-## 2. Dashboard settings: webhooks and integration
+## 2. Dashboard settings: webhooks and integration ✅
+
+Built as planned: Webhooks screen (save, secret once, test event with the shop's answer, recent
+deliveries, remove) and Integration screen (steps, API address, samples). All four samples run in the
+tests (PHP and curl when installed). Tests: `backend/test_payments.py` (test event, deliveries),
+`tests/e2e/test_settings.py`, `tests/e2e/test_samples.py`.
 
 Today webhooks can only be set through the API, and merchants have no guide in the product.
 
@@ -70,7 +80,9 @@ Today webhooks can only be set through the API, and merchants have no guide in t
 - Samples: Python and curl samples run in CI against the E2E server; PHP and Node.js run if the tools are
   installed on the machine.
 
-## 3. Checkout for shops
+## 3. Checkout for shops ✅
+
+Built as planned. **Decided:** upload (not a URL), PNG/JPEG only (SVG refused instead of sandboxed: simpler and safer). The test suite caught that the security-headers middleware overwrote every route's CSP, so the logo's strict policy was lost; fixed. Tests: `check_shop_and_idempotency` in `backend/test_payments.py` (incl. two retries at the same moment), `tests/e2e/test_shop.py`.
 
 The payer should see who they're paying and get back to the shop afterwards. Retries mustn't make
 two payments.
@@ -93,7 +105,13 @@ on the checkout page (tracking and privacy, and a CSP exception).
 - E2E: the checkout shows name and logo; the "Back to shop" link appears only after paid or expired;
   the phone layout still fits with a long shop name.
 
-## 4. Customer picks the coin; prices in USD/EUR
+## 4. Customer picks the coin; prices in USD/EUR ✅
+
+Built as planned. **Decided:** Kraken + Coinbase; checked live, Coinbase doesn't list TRX, so a coin listed
+by only one source uses it, and where both list it they must agree within 2%. Prices are stored with 2
+decimals. Tests: `backend/test_rates.py`, `check_price_requests` in `backend/test_payments.py` (incl. two
+choices at once), `tests/e2e/test_price.py`. While writing them, backend tests turned out to depend on the
+developer's `backend/.env` (test networks on); `backend/conftest.py` now fixes the settings.
 
 Shops price in dollars or euros, and customers have different coins.
 
@@ -117,7 +135,18 @@ have to roughly agree (within 2%) or the coin is unavailable.
 - Rate client: recorded answers from both sources, like `test_chain_client.py`.
 - E2E: choose a coin, see the converted amount, pay it on the fake chain, get to Paid; on a phone too.
 
-## 5. UI/UX redesign
+## 5. UI/UX redesign ✅
+
+Built with the Impeccable design skill, unattended (the owner said to keep going), so the skill's seeded
+direction was taken without a mock-up round. **Decided:** "assay hallmarks and the touchstone": a deep
+green-black shell, a cool sterling ground, gold only where something is proven, and small double-ruled
+hallmarks for coin, network and state; payment progress is struck as hallmarks (Waiting, Seen, Confirmed).
+Records: `PRODUCT.md`, `.impeccable/surfaces/` (direction contract), `DESIGN.md`. The wallet is now in tabs
+(Overview, Payments with search and filter, Settings, Integration); sign-up shows its steps; the checkout
+has one headline (the amount). Tests: `tests/e2e/test_design.py` (keyboard-only sign-up and tabs, focus
+ring, 320/375 px with no sideways scrolling on every page, search and filter, screenshot comparison of the
+checkout states in light and dark); every earlier E2E test passes unchanged in behavior (they now open tabs
+instead of collapsible sections).
 
 Sign-up, wallet and checkout should look like one product, and work for people who've never used
 crypto.
@@ -142,7 +171,15 @@ crypto.
 - Screenshot comparison of the checkout page states (waiting, partly paid, paid, expired) against
   approved images, so later changes can't break the layout unnoticed.
 
-## 6. Launch prep
+## 6. Launch prep 🔄
+
+**Built:** BlockCypher push hooks ([roadmap.md](roadmap.md#blockcypher-push-hooks)) and a smaller signing
+engine download. Measured, the engine was 21.3 MB (`core_proto.js` 10.8 MB and `wallet-core.wasm` 10.4 MB,
+not the 1-2 MB first assumed); trimming the vendored code would mean modifying it, so it's **compressed**
+instead: 4.7 MB with gzip (the app's `GZipMiddleware`, and Caddy's `encode gzip` in production). The frame
+hashes the decompressed bytes, so the SHA-256 pins are unchanged. Tests: `backend/test_hooks.py`.
+**Left, needing the owner:** the deploy ([deploy.md](deploy.md)), then the mainnet test with small amounts,
+and a one-time check of the hooks on staging with a real BlockCypher token.
 
 **Done when:**
 - **BlockCypher push hooks** for BTC/LTC/DOGE: the hook only asks the watcher to check that payment

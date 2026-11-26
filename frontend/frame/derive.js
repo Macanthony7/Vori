@@ -114,6 +114,9 @@
     var pending = null; // {phrase, passphrase, account} between the phrase step and the password step
 
     function finish(phrase, passphrase, account) {
+        var fromCreate = created !== null && phrase === created; // which steps to show: 3 for a new phrase, 2 for an import
+        $id("p-steps-create").hidden = !fromCreate;
+        $id("p-steps-import").hidden = fromCreate;
         pending = { phrase: phrase, passphrase: passphrase, account: account };
         // Best-effort wipe of the phrase inputs; it now lives only in `pending`.
         $id("words").textContent = "";

@@ -23,12 +23,46 @@ from assets import ASSETS
 
 log = logging.getLogger("watcher")
 LOOP_SLEEP = 5  # seconds between passes; per-chain pacing is payments.CHECK_EVERY
+UTXO = ("BTC", "LTC", "DOGE")
+# Push hooks need a token (BlockCypher) and a public HTTPS address it can call. Free plan: 100 stored hooks,
+# 100 callbacks an hour; when a hook can't be made, that payment simply keeps the normal polling.
+HOOKS = bool(chain_client.BLOCKCYPHER_TOKEN) and payments.PUBLIC_URL.startswith("https://") \
+    and os.getenv("GATEWAY_BLOCKCYPHER_HOOKS", "1") != "0"
+
+
+def manage_hooks(conn, now):
+    """Create hooks for open BTC/LTC/DOGE payments that have none yet; remove hooks of finished ones."""
+    if not HOOKS:
+        return
+    fresh = conn.execute(f"SELECT * FROM payments WHERE bc_hook IS NULL AND status IN ('pending', 'confirming') "
+                         f"AND chain IN ({','.join('?' * len(UTXO))}) LIMIT 20", UTXO).fetchall()
+    for p in fresh:
+        try:
+            hook = chain_client.create_hook(p["chain"], p["address"], payments.hook_url(p["id"]),
+                                            ASSETS[(p["chain"], p["asset"])]["confirmations"])
+        except chain_client.ChainError as e:
+            log.warning("%s: no BlockCypher hook (%s); polling instead", p["id"], e)
+            hook = "none"
+        with conn:
+            conn.execute("UPDATE payments SET bc_hook = ? WHERE id = ?", (hook, p["id"]))
+    done = conn.execute("""SELECT id, chain, bc_hook FROM payments WHERE bc_hook NOT IN ('none', 'done')
+                           AND (status = 'confirmed' OR (status = 'expired' AND expires_at <= ?)) LIMIT 20""",
+                        (db.at(now - payments.LATE_WATCH),)).fetchall()
+    for p in done:
+        try:
+            chain_client.delete_hook(p["chain"], p["bc_hook"])
+        except chain_client.ChainError as e:
+            log.warning("%s: hook not removed yet (%s)", p["id"], e)
+            continue  # retried next pass
+        with conn:
+            conn.execute("UPDATE payments SET bc_hook = 'done' WHERE id = ?", (p["id"],))
 _stop = False
 
 
 def tick(conn, now=None, observe=chain_client.observe, send=webhooks.send, limit=100, lookup=None):
     """One pass. Returns (checked, changed, delivered)."""
     now = now or datetime.now(timezone.utc)
+    manage_hooks(conn, now)
     due = conn.execute(
         "SELECT * FROM payments WHERE (status IN ('pending', 'confirming') OR (status = 'expired' AND expires_at > ?)) "
         "AND next_check_at <= ? ORDER BY next_check_at LIMIT ?",  # expired: late funds, for payments.LATE_WATCH

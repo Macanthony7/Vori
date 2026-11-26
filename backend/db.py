@@ -73,7 +73,13 @@ CREATE TABLE IF NOT EXISTS accounts (
     plan_expires_at TEXT,
     created_at      TEXT NOT NULL,
     webhook_url     TEXT,
-    webhook_secret  TEXT                       -- HMAC key for webhook signatures, sealed (must be stored to sign)
+    webhook_secret  TEXT,                      -- HMAC key for webhook signatures, sealed (must be stored to sign)
+    api_key_hint    TEXT,                      -- first characters of the current key ("gw_Xk3a"), to recognize it
+    api_key_used_at TEXT,                      -- last request with the API key (updated at most once a minute)
+    wallet_login_at TEXT,                      -- first wallet sign-in; from then on settings need a session
+    shop_name       TEXT,                      -- shown on the checkout page
+    shop_logo       TEXT,                      -- PNG/JPEG bytes, base64 (at most 100 KB)
+    shop_logo_type  TEXT                       -- image/png | image/jpeg
 );
 CREATE TABLE IF NOT EXISTS account_xpubs (
     account_id  INTEGER NOT NULL REFERENCES accounts(id),
@@ -102,11 +108,35 @@ CREATE TABLE IF NOT EXISTS payments (
     confirmed_at        TEXT,
     updated_at          TEXT NOT NULL,
     next_check_at       TEXT NOT NULL,
-    tx_hashes           TEXT NOT NULL DEFAULT '[]'  -- JSON list of incoming transaction hashes, oldest first
+    tx_hashes           TEXT NOT NULL DEFAULT '[]', -- JSON list of incoming transaction hashes, oldest first
+    return_url          TEXT,                  -- "Back to shop" link on the checkout page
+    price               TEXT,                  -- for payments priced in USD/EUR: the price, its currency,
+    currency            TEXT,                  -- and the rate used (price of 1 coin) when the payer chose
+    rate                TEXT,
+    bc_hook             TEXT                   -- BlockCypher push hook: NULL not tried, "none" unavailable, "done" removed, else its id
 );
 CREATE INDEX IF NOT EXISTS payments_due ON payments(status, next_check_at);
 CREATE INDEX IF NOT EXISTS payments_account ON payments(account_id, created_at);
 CREATE INDEX IF NOT EXISTS payments_address ON payments(account_id, xpub_chain, address_index);
+CREATE TABLE IF NOT EXISTS idempotency_keys (  -- POST /payments retries return the same payment for 24 h
+    account_id  INTEGER NOT NULL REFERENCES accounts(id),
+    key         TEXT NOT NULL,                 -- the Idempotency-Key header
+    body_hash   TEXT NOT NULL,                 -- sha256 of the request, to refuse the same key for another order
+    payment_id  TEXT NOT NULL,                 -- a payment, or a price request (no coin chosen yet)
+    created_at  TEXT NOT NULL,
+    PRIMARY KEY (account_id, key)
+);
+CREATE TABLE IF NOT EXISTS price_requests (  -- priced in USD/EUR; the payer picks the coin on the checkout page
+    id          TEXT PRIMARY KEY,              -- "pay_...": becomes the payment's id once a coin is chosen
+    account_id  INTEGER NOT NULL REFERENCES accounts(id),
+    price       TEXT NOT NULL,                 -- decimal string, e.g. "25.00"
+    currency    TEXT NOT NULL,                 -- USD | EUR
+    accept      TEXT NOT NULL,                 -- JSON list of "CHAIN/ASSET" the payer may choose
+    reference   TEXT,
+    return_url  TEXT,
+    created_at  TEXT NOT NULL,
+    expires_at  TEXT NOT NULL                  -- choose a coin by then
+);
 CREATE TABLE IF NOT EXISTS webhook_events (
     id              INTEGER PRIMARY KEY,
     account_id      INTEGER NOT NULL REFERENCES accounts(id),
@@ -132,7 +162,12 @@ CREATE TABLE IF NOT EXISTS sessions (
 
 # Columns added after 0.1.0; CREATE TABLE IF NOT EXISTS won't add them to an existing database.
 MIGRATIONS = [("accounts", "webhook_url", "TEXT"), ("accounts", "webhook_secret", "TEXT"),
-              ("payments", "tx_hashes", "TEXT NOT NULL DEFAULT '[]'"), ("account_xpubs", "xpub_tag", "TEXT")]
+              ("payments", "tx_hashes", "TEXT NOT NULL DEFAULT '[]'"), ("account_xpubs", "xpub_tag", "TEXT"),
+              ("accounts", "api_key_hint", "TEXT"), ("accounts", "api_key_used_at", "TEXT"),
+              ("accounts", "wallet_login_at", "TEXT"), ("accounts", "shop_name", "TEXT"),
+              ("accounts", "shop_logo", "TEXT"), ("accounts", "shop_logo_type", "TEXT"), ("payments", "return_url", "TEXT"),
+              ("payments", "price", "TEXT"), ("payments", "currency", "TEXT"), ("payments", "rate", "TEXT"),
+              ("payments", "bc_hook", "TEXT")]
 
 
 def connect():

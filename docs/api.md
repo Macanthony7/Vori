@@ -114,11 +114,28 @@ Authenticated. Returns the account that owns the key.
   "plan": "free",
   "plan_expires_at": null,
   "webhook_url": "https://shop.example/hooks/crypto",
+  "api_key_hint": "gw_Xk3a",
+  "api_key_used_at": "2026-11-26T15:02:11Z",
+  "settings_need_wallet": true,
   "chains": { "ETH": { "first_address": "0xe5815d…2772", "also_used_for": ["BSC"] } }
 }
 ```
 
+- `api_key_hint`: the first 7 characters of the current API key, to tell which key a shop has. `null`
+  for keys made before hints existed.
+- `api_key_used_at`: the last request made with the API key (updated at most once a minute), or `null`.
+- `settings_need_wallet`: `true` once the account has signed in to the wallet. From then on the webhook
+  and the API key can only be changed with a wallet session ([Settings protection](#settings-protection)).
+
 **401**: missing or invalid key.
+
+### Settings protection
+
+`PUT` and `DELETE /accounts/me/webhook` and `POST /accounts/me/api-key` answer **403**
+`this needs the wallet sign-in…` when called with an API key on an account that has signed in to the
+wallet. A leaked API key can then only create and read payments: it can't redirect or stop webhooks,
+and it can't replace the key to lock the shop out. Accounts that never signed in to the wallet
+(xpub-only accounts, whose phrase isn't in our wallet) can still use the API key for these.
 
 ---
 
@@ -137,6 +154,9 @@ Authenticated. Create a payment and get a receive address for it.
 | `chain`, `asset` | yes | A pair from [Assets](#assets). Case-insensitive. |
 | `amount` | yes | Decimal **string**, > 0, at most the asset's decimals. |
 | `reference` | no | Your own order id, up to 100 characters. Returned as-is, never interpreted. |
+| `return_url` | no | Where "Back to {shop}" on the checkout page leads once the payment is paid or expired. `https://` only (`http://localhost` for development), up to 500 characters. Only ever a link the payer clicks, never a redirect. |
+
+**Header `Idempotency-Key`** (optional, up to 100 characters, e.g. your order id plus attempt): retrying the same request with the same key within 24 h returns the **same payment** (**200** and `Idempotent-Replayed: true` instead of 201), so a timeout or a double click can't create two payments for one order. The same key with a different body gets **409**.
 
 **201 Created**: the payment object.
 
@@ -172,8 +192,39 @@ Send the customer to `checkout_url` (see [Checkout page](#checkout-page)), or sh
 `amount`, `asset` and the network yourself. For tokens, the network matters: USDT sent on the
 wrong chain won't be seen.
 
-**400**: unsupported chain/asset, bad amount, too long `reference`, or no xpub registered for that
-chain (`no LTC xpub is registered on this account`). **401**: bad key.
+**400**: unsupported chain/asset, bad amount, too long `reference`, a bad `return_url` or
+`Idempotency-Key`, or no xpub registered for that chain (`no LTC xpub is registered on this account`).
+**401**: bad key. **409**: `Idempotency-Key` already used for a different payment.
+
+### Prices in USD or EUR
+
+Instead of `chain` + `asset` + `amount`, send a price and let the **payer pick the coin** on the checkout page:
+
+```json
+{ "price": "25.00", "currency": "USD", "accept": ["BTC/BTC", "TRX/USDT"], "reference": "order-1042" }
+```
+
+| Field | Required | Notes |
+|---|---|---|
+| `price` | yes | Decimal string above 0, at most 2 decimal places, up to 1,000,000. Stored with 2 decimals. |
+| `currency` | yes | `USD` or `EUR` |
+| `accept` | no | Which `"CHAIN/ASSET"` the payer may choose. Default: every pair the account has an xpub for. |
+
+**201**: the payment with `"status": "choosing"`, `price`, `currency`, `accept`, `checkout_url`, and `chain`,
+`asset`, `address` and `amount` all `null`. The payer has **30 minutes to choose**, after which it shows as
+`expired` (no webhook: no address was ever shown, so nothing can arrive).
+
+When the payer chooses, the amount is converted at the current rate and **locked**: the payment gets the
+same `id`, its `chain`, `asset`, `address` and `amount`, plus `price`, `currency` and `rate` (the price of
+one coin used), and a normal 30-minute window starts. From then on it's an ordinary payment: same
+statuses, webhooks and checkout. The coin can't be changed afterwards.
+
+**Rates:** Kraken and Coinbase public tickers, cached 60 s. Where both list a coin they must agree within
+2% (their average is used); TRX is only on Kraken. USDT is exactly 1 USD. If no fresh, trusted rate is
+available, that coin can't be chosen right now: never a stale or disputed price. Amounts are **rounded
+up** to the coin's smallest unit, so the merchant never receives less than the price.
+
+`GET /payments` lists payments still being chosen too (`?status=choosing`).
 
 ### Address assignment
 
@@ -226,15 +277,25 @@ that network. It refreshes every 5 s and follows the status:
 | `expired` | Don't send anything; ask the merchant for a new payment (or contact them if part was received) | no |
 
 The address is hidden once sending is no longer useful, so nobody pays into an expired payment.
+For a payment priced in USD/EUR the page first shows **Choose how to pay**: each accepted coin with its converted amount ("price unavailable" when there's no trusted rate), then the normal page once one is picked.
 Once anything is received, the page links to the address on the block explorer ("View on the block
 explorer"). It never shows transaction hashes; those are in the API, webhooks and the wallet only.
 QR codes for BTC, LTC and DOGE are BIP21 URIs with the amount (`bitcoin:<address>?amount=0.001`).
 For Ethereum, BSC and Tron the QR is the **bare address**: payment URIs there are read
 inconsistently by wallets and could send the wrong token.
 
-The page has no merchant name, no logo and no return link yet.
+With a shop name and logo set ([`PUT /accounts/me/shop`](#put-accountsmeshop)) the page shows "Payment to {shop}" and the logo at the top. With a `return_url`, "Back to {shop}" appears once nothing is left to do on the page (paid, confirming or expired).
 
-### `GET /pay/{id}/status`
+### `POST /pay/{id}/choose`
+
+Public, like the status endpoint (the payment link is the access token). For a payment priced in
+USD/EUR: `{"chain": "TRX", "asset": "USDT"}` picks the coin, locks the rate and returns the checkout data
+of the new payment. **400**: not accepted for this payment. **404**: unknown id. **409**: a coin was already
+chosen. **410**: not chosen within 30 minutes. **503**: no trusted rate for that coin right now.
+While choosing, `GET /pay/{id}/status` returns `status: "choosing"`, `price`, `currency` and `options`:
+`[{"chain", "asset", "amount", "available"}]`.
+
+## `GET /pay/{id}/status`
 
 Public, no API key. The data behind the checkout page. **404** if the payment doesn't exist.
 
@@ -260,8 +321,8 @@ Public, no API key. The data behind the checkout page. **404** if the payment do
 ```
 
 Same fields as the payment object **minus `reference`** (your order data stays private) and `transactions`, plus
-`amount_due` (amount minus received, never below 0) and `server_time` (so the countdown is right
-even when the payer's clock is wrong). Don't use it from your server: use the authenticated
+`amount_due` (amount minus received, never below 0), `server_time` (so the countdown is right
+even when the payer's clock is wrong), `shop_name` and `logo_url` (`/pay/{id}/logo`, or `null`). Don't use it from your server: use the authenticated
 `GET /payments/{id}`.
 
 ## Wallet
@@ -296,8 +357,8 @@ Ends the session in the `Authorization` header (the wallet's Lock button). **204
 
 ### `POST /accounts/me/api-key`
 
-Authenticated (API key or session). Makes a new API key and returns it once:
-`{"api_key": "gw_…"}`. **The old key stops working immediately.**
+Wallet session (API key only for accounts that never signed in to the wallet: [Settings protection](#settings-protection)).
+Makes a new API key and returns it once: `{"api_key": "gw_…"}`. **The old key stops working immediately.**
 
 ### `GET /wallet/balances`
 
@@ -442,8 +503,8 @@ stateDiagram-v2
 
 ## `PUT /accounts/me/webhook`
 
-Authenticated. Set where payment events are sent. **Every call generates a new secret**, which is
-returned once.
+Wallet session ([Settings protection](#settings-protection)). Set where payment events are sent.
+**Every call generates a new secret**, which is returned once.
 
 ```json
 { "url": "https://shop.example/hooks/crypto" }
@@ -460,7 +521,32 @@ loopback or link-local address.
 
 ## `DELETE /accounts/me/webhook`
 
-Authenticated. Stops webhooks. **204**. Events already queued are dropped.
+Wallet session ([Settings protection](#settings-protection)). Stops webhooks. **204**. Events already queued are dropped.
+
+## `PUT /accounts/me/shop`
+
+Wallet session ([Settings protection](#settings-protection)): a leaked API key mustn't be able to rename the shop payers think they're paying. `{"name": "Corner Café", "logo": "data:image/png;base64,…"}`.
+
+- `name`: up to 60 characters on one line; `null` or `""` clears it.
+- `logo`: a PNG or JPEG data URL, at most 100 KB, checked against the file's real signature (SVG is refused: it can carry scripts). `null` or `""` removes it; leave the field out to keep the current one.
+
+**200** `{"shop_name": "Corner Café", "has_logo": true}`. The logo is served at `GET /pay/{id}/logo` for each payment, from our own domain, with `Content-Security-Policy: default-src 'none'`. `GET /accounts/me` also returns `shop_name`, `has_logo` and `logo` (the data URL).
+
+## `POST /accounts/me/webhook/test`
+
+Same rule as above. Sends a signed `payment.test` event to the webhook right away and reports how the
+shop answered: **200** `{"delivered": true, "error": null}`, or `{"delivered": false, "error": "HTTP 500"}`
+(or a timeout or connection error). The payment in it is a sample: its id starts with `pay_test_` and
+its `reference` is `test-event`, so it can't be mistaken for a real one. **400** if no webhook is set.
+6 per minute.
+
+## `GET /accounts/me/webhook/deliveries`
+
+Authenticated. The account's 20 most recent events, newest first:
+`{"deliveries": [{"id", "payment_id", "event", "status", "attempts", "delivered_at", "next_attempt_at", "last_error"}]}`.
+`status` is `delivered`, `queued` (not tried yet), `retrying` (failed, will retry) or `failed` (gave up
+after the last retry, or the webhook was removed). Test events aren't listed: they're sent at once,
+not queued.
 
 ## Webhooks
 
@@ -479,12 +565,17 @@ Gateway-Signature: t=1795369511,v1=5f2c0e…
 | `payment.confirming` | Full amount seen, waiting for confirmations |
 | `payment.confirmed` | Final: paid and confirmed |
 | `payment.expired` | Final: not paid (or not confirmed) in time |
+| `payment.test` | Only from `POST /accounts/me/webhook/test` (the wallet's "Send test event"); a sample payment |
 | `payment.paid_late` | More confirmed funds arrived on an `expired` payment. `status` stays `expired`; check `amount_confirmed` and refund or fulfil by hand |
 
 **Delivery:** any `2xx` response counts as delivered. Otherwise the event is retried after 1 min,
 5 min, 30 min, 2 h, 6 h and 24 h, then dropped. Redirects aren't followed. The timeout is 10 s.
 Events can arrive more than once or out of order, so key your handling on `payment.id` +
 `payment.status`, and when in doubt call `GET /payments/{id}`.
+
+**Code samples** that create a payment and verify signatures, in Python, Node.js, PHP and curl, are in
+`frontend/public/samples/` and on the wallet's Integration screen. The test suite runs each of them
+against the gateway (`tests/e2e/test_samples.py`).
 
 **Verifying the signature** (do this before trusting the body):
 

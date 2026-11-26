@@ -11,7 +11,7 @@
 | Data | Sensitivity | Protection |
 |---|---|---|
 | Account xpubs | **Privacy-sensitive, can't spend.** They reveal every address and the full history of that wallet account. | Encrypted at rest ([Database](#database)); decrypted in memory only to derive addresses. Users are told to use a dedicated account or wallet. |
-| API key | Credential | Only `sha256(key)` is stored. Keys are 256-bit random (`secrets.token_urlsafe(32)`), so a fast hash is enough. Replaceable from the wallet (`POST /accounts/me/api-key`). |
+| API key | Credential for the shop's server | Only `sha256(key)` and its first 7 characters are stored. Keys are 256-bit random (`secrets.token_urlsafe(32)`), so a fast hash is enough. Can create and read payments, never move funds; see [API keys](#api-keys). |
 | Wallet sessions | Credential, 12 h | Only `sha256(token)` is stored. Created only by a valid signature from the account's BTC main key; deleted on Lock. |
 | Webhook secret | Lets someone forge webhooks to that merchant | Encrypted at rest ([Database](#database)); the server decrypts it to sign. Rotated by calling `PUT /accounts/me/webhook` again. |
 | Payments | Business data: amounts, addresses, merchant references | Only visible to the owning API key (`404` for others). |
@@ -20,6 +20,23 @@
 
 There's no master seed, no `SEED_PHRASE`, no hot wallet and no signing code anywhere in the gateway.
 Payments land directly in the merchant's wallet.
+
+## API keys
+
+The API key belongs on the shop's server (an environment variable or the hosting panel's secret
+settings), never in web pages, apps or git. The API sends no CORS headers, so a key pasted into
+browser code doesn't work from other sites anyway.
+
+| With a leaked key, someone can | Can't |
+|---|---|
+| Create payments (they pay into the merchant's own wallet; 60 a minute) | Move, redirect or spend funds: addresses come from the xpub, sending needs the phrase in the offline frame |
+| Read the payment list (amounts, dates, order references) | Change or remove the webhook, or replace the API key, once the account has signed in to the wallet ([api.md](api.md#settings-protection)) |
+
+Those settings then need a **wallet session**, which only a signature by the wallet's own key can
+create. Accounts that never signed in (xpub-only) still change them with the API key; signing a
+challenge with their own wallet (Electrum/Sparrow) would close that, and isn't built.
+The wallet shows the key's first characters and when it was last used, so a merchant can spot a key
+they don't recognize. Replacing it takes one click in the wallet.
 
 ## Database
 
@@ -177,7 +194,19 @@ recovered every signer and matched chain id, nonces, gas, contract, recipient, a
 limit, block reference and txID. The frame refused a planted address, a main address short of gas,
 and a TRX amount that didn't leave room for activating a new destination.
 
+## Prices and exchange rates
+
+A wrong rate means the merchant is paid too little. So: two independent sources (Kraken, Coinbase) must
+agree within 2% where both list the coin, a coin with no fresh trusted rate can't be chosen at all (no stale
+prices, failures aren't cached), amounts are rounded up, and the rate is locked the moment the payer
+chooses, then stored on the payment (`rate`) for disputes. A coin only one source lists (TRX) relies on that
+source alone. `POST /pay/{id}/choose` is public like the rest of the checkout: anyone with the link can pick
+the coin, which only decides how the payer pays. It can't be changed once picked, and two choices at once
+make one payment (the loser gets 409 and uses no address).
+
 ## Input validation (server)
+
+**Shop logo:** PNG or JPEG only, at most 100 KB, the bytes must start with the real PNG/JPEG signature (the declared type alone isn't trusted), and SVG is refused. It's served from our own domain with `default-src 'none'` and `nosniff`, so the checkout page loads nothing from elsewhere and a crafted file can't run as a page. **`return_url`:** `https://` only (`http://localhost` for development), no credentials, quotes, spaces or angle brackets; the page only shows it as a link after paying, never redirects, so it can't be used as an open redirect on our domain.
 
 `xpubs.normalize()` is the only door for keys:
 - Base58Check decode, exact 78-byte length, max 120 characters.

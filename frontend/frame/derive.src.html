@@ -19,6 +19,7 @@
 
 <section id="create" hidden>
     <div id="c-show">
+        <ol class="stepper" aria-label="Steps"><li class="mark" aria-current="step">1 Write it down</li><li class="mark">2 Check</li><li class="mark">3 Password</li></ol>
         <h2>Your recovery phrase</h2>
         <p>Write these 12 words on paper, in order. Anyone who has them can spend your funds. If you lose them, nobody can recover your funds, including us.</p>
         <ol id="words" class="words"></ol>
@@ -26,6 +27,7 @@
         <button type="button" id="c-next" disabled>Continue</button>
     </div>
     <div id="c-confirm" hidden>
+        <ol class="stepper" aria-label="Steps"><li class="mark done">1 Write it down</li><li class="mark" aria-current="step">2 Check</li><li class="mark">3 Password</li></ol>
         <h2>Confirm your phrase</h2>
         <p>Type the words at these positions to check your backup.</p>
         <div id="c-checks"></div>
@@ -38,6 +40,7 @@
 </section>
 
 <section id="import" hidden>
+    <ol class="stepper" aria-label="Steps"><li class="mark" aria-current="step">1 Phrase</li><li class="mark">2 Password</li></ol>
     <h2>Enter your recovery phrase</h2>
     <p>It stays on this device. Only public keys are sent to our server.</p>
     <label for="i-phrase">Recovery phrase (12 to 24 words, English)</label>
@@ -55,6 +58,8 @@
 </section>
 
 <section id="password" hidden>
+    <div id="p-steps-create" hidden><ol class="stepper" aria-label="Steps"><li class="mark done">1 Write it down</li><li class="mark done">2 Check</li><li class="mark" aria-current="step">3 Password</li></ol></div>
+    <div id="p-steps-import" hidden><ol class="stepper" aria-label="Steps"><li class="mark done">1 Phrase</li><li class="mark" aria-current="step">2 Password</li></ol></div>
     <h2>Choose a password</h2>
     <p>It unlocks your wallet on this device, so you don't need your recovery phrase every time. Your phrase is encrypted with it and never leaves this device.</p>
     <label for="p-new">Password (at least 8 characters)</label>

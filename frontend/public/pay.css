@@ -1,30 +1,95 @@
 /* Checkout page only. Kept out of styles.css, which is hash-pinned inside the seed frame. */
-.pay { max-width: 460px; }
-.pay header { text-align: center; }
-.pay header p { margin: 0; }
-.amount { font-size: 2rem; font-weight: 700; line-height: 1.2; word-break: break-all; }
-.network { color: var(--muted); }
+.pay { max-width: 480px; padding-top: var(--s5); }
+.loading-card { padding: var(--s5); text-align: center; color: var(--muted); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
+
+/* Who's being paid: the touchstone band, the page's one dark field. */
+.shop {
+    display: flex;
+    align-items: center;
+    gap: var(--s3);
+    margin: 0 0 var(--s4);
+    padding: var(--s3) var(--s4);
+    background: var(--stone);
+    color: var(--on-stone);
+    border-radius: var(--radius);
+    overflow-wrap: anywhere;
+}
+.shop span { color: var(--on-stone-muted); }
+.shop strong { color: var(--on-stone); }
+.shop img { flex: none; max-width: 96px; max-height: 40px; object-fit: contain; padding: var(--s1); background: #fff; border-radius: 4px; }
+
+#payment, #choose {
+    padding: var(--s5);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    box-shadow: 0 12px 36px -22px rgba(16, 26, 22, 0.5);
+}
+
+/* The amount owns the field: the only headline on the page. */
+.due { text-align: center; }
+.due p { margin: 0; }
+.due-label, #choose .lede { color: var(--muted); font-size: var(--t-sm); font-weight: 600; }
+.amount { margin: var(--s1) 0; font-size: var(--t-display); font-weight: 700; line-height: 1.1; letter-spacing: -0.02em; overflow-wrap: anywhere; }
+.amount .unit { color: var(--muted); font-weight: 600; font-size: 0.55em; letter-spacing: 0; }
+.network { margin-top: var(--s2); color: var(--muted); font-size: var(--t-sm); }
+.network .mark { color: var(--ink); font-size: var(--t-xs); }
+
+/* Hallmark strip: the same three stages everywhere, struck in order. */
+.progress { display: flex; justify-content: center; flex-wrap: wrap; gap: var(--s2); margin: var(--s5) 0 0; padding: 0; list-style: none; }
+/* Not yet struck: a single dashed rule in the muted ink (still AA). The current stage is the gold one. */
+.progress .mark { color: var(--muted); border-style: dashed; box-shadow: none; }
+.progress .mark.now { color: var(--gold-ink); background: var(--gold-bg); border-style: solid; box-shadow: inset 0 0 0 1.5px var(--gold-bg), inset 0 0 0 2.5px currentColor; }
+.progress .mark.done { color: var(--ok); border-style: solid; box-shadow: inset 0 0 0 1.5px var(--surface), inset 0 0 0 2.5px currentColor; }
+.progress .mark.proven { color: var(--gold-ink); background: var(--gold-bg); box-shadow: inset 0 0 0 1.5px var(--gold-bg), inset 0 0 0 2.5px currentColor; }
+.progress .mark.bad { color: var(--bad); border-style: solid; box-shadow: inset 0 0 0 1.5px var(--surface), inset 0 0 0 2.5px currentColor; }
 
 .status {
-    margin: 20px 0;
-    padding: 12px 14px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    background: var(--surface);
+    margin: var(--s4) 0;
+    padding: var(--s3) var(--s4);
+    border-radius: 6px;
+    background: var(--surface-2);
     text-align: center;
     font-weight: 600;
 }
-.status[data-tone=good] { border-color: #2e7d32; color: #2e7d32; }
-.status[data-tone=bad] { border-color: var(--danger); color: var(--danger); }
-@media (prefers-color-scheme: dark) {
-    .status[data-tone=good] { border-color: #81c784; color: #81c784; }
-}
+.status[data-tone=good] { background: var(--ok-bg); color: var(--ok); }
+.status[data-tone=bad] { background: var(--bad-bg); color: var(--bad); }
 
 /* QR stays black on white in dark mode: some scanners fail on inverted codes. */
-.qr { display: flex; justify-content: center; }
-.qr canvas { box-sizing: content-box; padding: 10px; background: #fff; border-radius: 8px; }
+.qr { display: flex; justify-content: center; margin: var(--s5) 0 var(--s2); }
+.qr canvas { box-sizing: content-box; max-width: 100%; height: auto; padding: var(--s3); background: #fff; border-radius: 6px; border: 1px solid var(--line); }
 
-#address { resize: none; word-break: break-all; }
-.countdown { text-align: center; margin-top: 16px; }
-.countdown strong { font-variant-numeric: tabular-nums; }
-.pay .note { text-align: center; word-break: break-all; }
+#address { resize: none; overflow-wrap: anywhere; }
+.countdown { display: flex; justify-content: center; align-items: baseline; gap: var(--s2); margin-top: var(--s4); color: var(--muted); }
+.countdown strong { color: var(--ink); font-size: var(--t-lg); }
+.pay .note { text-align: center; overflow-wrap: anywhere; }
+#network-warning { margin-top: var(--s4); font-size: var(--t-sm); }
+
+.pay-options { display: grid; gap: var(--s2); margin-top: var(--s3); }
+.pay-options button {
+    justify-content: space-between;
+    width: 100%;
+    margin: 0;
+    padding: var(--s3) var(--s4);
+    text-align: left;
+    font-weight: 500;
+}
+.pay-options button span:last-child { font-weight: 700; white-space: nowrap; }
+.pay-options button:disabled span:last-child { font-weight: 400; font-size: var(--t-sm); }
+#choose h2 { text-align: center; margin-top: var(--s5); font-size: var(--t-lg); }
+#choose header { text-align: center; }
+#choose header p { margin: 0; }
+
+.back { margin-top: var(--s5); text-align: center; overflow-wrap: anywhere; }
+.back a { display: inline-flex; align-items: center; min-height: 44px; padding: 0 var(--s4); border: 1px solid var(--line-strong); border-radius: 6px; font-weight: 600; text-decoration: none; color: var(--ink); }
+.back a:hover { border-color: var(--ink); background: var(--surface-2); }
+
+@media (max-width: 380px) {
+    .pay { padding-left: var(--s3); padding-right: var(--s3); }
+    #payment, #choose { padding: var(--s4); }
+    .amount { font-size: var(--t-3xl); }
+}
+
+@media (prefers-color-scheme: dark) {
+    .shop { border: 1px solid var(--line); } /* the stone band sits on a dark ground: give it an edge */
+}

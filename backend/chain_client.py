@@ -70,6 +70,29 @@ def _token():
     return {"token": BLOCKCYPHER_TOKEN} if BLOCKCYPHER_TOKEN else {}
 
 
+def create_hook(chain, address, url, confirmations):
+    """Ask BlockCypher to POST to `url` when a transaction to `address` is seen and on each confirmation
+    (event tx-confirmation, at most 10). Returns the hook id. Needs BLOCKCYPHER_TOKEN."""
+    try:
+        r = requests.post(_blockcypher(chain, "/hooks"), params=_token(), timeout=TIMEOUT, json={
+            "event": "tx-confirmation", "address": address, "url": url, "confirmations": min(confirmations, 10)})
+        data = r.json()
+    except (requests.RequestException, ValueError) as e:
+        raise ChainError(f"hook: {e}") from None
+    if r.status_code >= 300 or not data.get("id"):
+        raise ChainError(f"hook refused: {str(data.get('error') or data)[:200]}")
+    return data["id"]
+
+
+def delete_hook(chain, hook_id):
+    try:
+        r = requests.delete(_blockcypher(chain, f"/hooks/{hook_id}"), params=_token(), timeout=TIMEOUT)
+    except requests.RequestException as e:
+        raise ChainError(f"hook delete: {e}") from None
+    if r.status_code not in (204, 404):  # 404: already gone (BlockCypher drops hooks after many failed callbacks)
+        raise ChainError(f"hook delete: HTTP {r.status_code}")
+
+
 def unspent(chain, address, min_confirmations=1):
     """Spendable outputs of an address: [{tx_hash, vout, value, confirmations}] (value in smallest units)."""
     data = _get(_blockcypher(chain, f"/addrs/{address}"), params={"unspentOnly": "true", "limit": 200, **_token()})

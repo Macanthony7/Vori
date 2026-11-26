@@ -86,7 +86,6 @@ def test_send_usdt_on_tron_with_gas_topup(page, server, chain, tick):
     import_wallet(page)
     unlock(page)
     # A paid USDT payment: its address holds the USDT but no TRX for fees.
-    page.click("#charge summary")
     page.fill("#charge-amount", "3")
     page.select_option("#charge-network", "TRX/USDT")
     page.click("#charge-create")

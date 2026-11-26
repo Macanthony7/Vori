@@ -1,55 +1,159 @@
 /* Wallet page only. Kept out of styles.css, which is hash-pinned inside the seed frame. */
-.wallet-head, .section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.section-head { margin: 24px 0 8px; }
-.section-head h2 { margin: 0; }
-.wallet-head button { margin-top: 0; }
-.section-head button.link { margin: 0; }
 
-.balances { list-style: none; padding: 0; margin: 8px 0; display: grid; gap: 8px; }
+/* --- Shell bar: styles.css. Tabs live here. --- */
+.tabbar { display: flex; align-self: stretch; gap: var(--s1); overflow-x: auto; scrollbar-width: none; }
+.tabbar::-webkit-scrollbar { display: none; }
+.tabbar [role=tab] {
+    min-height: 0;
+    margin: 0;
+    padding: 0 var(--s3);
+    border: 0;
+    border-radius: 0;
+    background: none;
+    color: var(--on-stone-muted);
+    font-weight: 600;
+    box-shadow: inset 0 -3px 0 transparent;
+    white-space: nowrap;
+}
+.tabbar [role=tab]:hover { background: none; color: var(--on-stone); }
+.tabbar [role=tab][aria-selected=true] { color: var(--on-stone); box-shadow: inset 0 -3px 0 var(--gold); }
+.tabbar [role=tab]:focus-visible { outline-offset: -4px; }
+.shell-button {
+    margin: 0 0 0 auto;
+    min-height: 36px;
+    padding: var(--s1) var(--s4);
+    background: transparent;
+    color: var(--on-stone);
+    border-color: rgba(233, 239, 236, 0.35);
+}
+.shell-button:hover { background: var(--stone-2); border-color: var(--on-stone); }
+
+/* --- Layout -------------------------------------------------------------------------------------------- */
+.app-main { max-width: 1040px; padding-top: var(--s5); }
+.narrow { max-width: 560px; margin: 0 auto; }
+.section-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s3); margin: var(--s2) 0 var(--s3); }
+.section-head h2 { margin: 0; }
+.section-head button.link { margin: 0; }
+.overview { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: var(--s6); align-items: start; }
+@media (max-width: 860px) { .overview { grid-template-columns: minmax(0, 1fr); gap: var(--s5); } }
+
+.card, .sheet {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: var(--s5);
+}
+.card + .card { margin-top: var(--s4); }
+.card h2, .sheet h2 { margin-top: 0; }
+.sheet { margin: var(--s4) 0; box-shadow: 0 10px 30px -18px rgba(16, 26, 22, 0.45); animation: sheet-in 220ms var(--ease) both; }
+@keyframes sheet-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+#panel-settings { max-width: 720px; }
+#panel-integration { max-width: 860px; }
+
+.loading { padding: var(--s4); border-radius: var(--radius); background: var(--surface); border: 1px solid var(--line); }
+
+/* --- Balances: whole rows that repack, never squeezed cells ------------------------------------------- */
+.balances { list-style: none; padding: 0; margin: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
 .balances li {
     display: grid;
-    grid-template-columns: 1fr auto auto;
-    row-gap: 8px;
+    grid-template-columns: minmax(0, 1fr) auto auto;
     align-items: center;
-    gap: 12px;
-    padding: 12px 14px;
+    gap: var(--s4);
+    padding: var(--s3) var(--s4);
+    border-top: 1px solid var(--line);
+}
+.balances li:first-child { border-top: 0; }
+.balances li.note { display: block; }
+.balances .asset { font-weight: 650; font-size: var(--t-lg); line-height: 1.2; }
+.balances .network { margin-top: var(--s1); }
+.balances .amount { font-weight: 650; font-size: var(--t-lg); text-align: right; overflow-wrap: anywhere; }
+.balances .amount.zero { color: var(--muted); font-weight: 500; }
+.balances .actions-cell { display: flex; gap: var(--s2); }
+.balances .actions-cell button { margin: 0; min-height: 36px; padding: var(--s1) var(--s3); font-size: var(--t-sm); }
+@media (max-width: 560px) {
+    .balances li { grid-template-columns: minmax(0, 1fr) auto; row-gap: var(--s2); }
+    .balances .actions-cell { grid-column: 1 / -1; justify-content: flex-end; }
+}
+
+.qr { display: flex; justify-content: center; margin: var(--s3) 0; }
+.qr canvas { box-sizing: content-box; padding: var(--s3); background: #fff; border-radius: 6px; border: 1px solid var(--line); }
+#receive-address { resize: none; overflow-wrap: anywhere; }
+
+/* --- Payments: filters over the table they scope -------------------------------------------------------- */
+.filters { display: grid; grid-template-columns: minmax(0, 1fr) 200px; gap: var(--s3); margin-bottom: var(--s4); }
+@media (max-width: 560px) { .filters { grid-template-columns: 1fr; } }
+.empty {
+    padding: var(--s6) var(--s5);
+    text-align: center;
     background: var(--surface);
-    border: 1px solid var(--border);
+    border: 1px dashed var(--line-strong);
     border-radius: var(--radius);
 }
-.balances .asset { font-weight: 600; }
-.balances .network { color: var(--muted); font-size: 0.94rem; }
-.balances .amount { font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; word-break: break-all; }
-.balances button { margin: 0; padding: 6px 12px; }
+.empty h3 { margin-top: 0; }
+.empty p { max-width: 52ch; margin: var(--s2) auto 0; color: var(--muted); }
 
-.receive {
-    margin: 16px 0;
-    padding: 16px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-}
-.receive h2 { margin: 0; }
-.qr { display: flex; justify-content: center; margin: 12px 0; }
-.qr canvas { box-sizing: content-box; padding: 10px; background: #fff; border-radius: 8px; }
-#receive-address { resize: none; word-break: break-all; }
-
-.table-wrap { overflow-x: auto; }
-table { width: 100%; border-collapse: collapse; font-size: 0.94rem; }
-th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--border); }
-th { color: var(--muted); font-weight: 600; }
+.table-wrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
+.table-wrap:has(table[hidden]) { display: none; }
+table { width: 100%; border-collapse: collapse; font-size: var(--t-sm); }
+th, td { text-align: left; padding: var(--s3) var(--s4); border-bottom: 1px solid var(--line); vertical-align: middle; }
+tbody tr:last-child td { border-bottom: 0; }
+th { color: var(--muted); font-weight: 600; font-size: var(--t-xs); letter-spacing: 0.04em; text-transform: uppercase; background: var(--surface-2); }
+tbody tr { transition: background-color 160ms var(--ease); }
+tbody tr:hover { background: var(--surface-2); --mark-field: var(--surface-2); }
 td.num { font-variant-numeric: tabular-nums; }
+td .mark { margin-right: var(--s2); }
+td a { white-space: nowrap; }
 
-select {
-    width: 100%;
-    padding: 10px 12px;
-    font: inherit;
-    color: var(--text);
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-}
-.balances .actions-cell { display: flex; gap: 8px; }
-.status-good { padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); word-break: break-all; }
+.status-good { margin: var(--s3) 0 0; padding: var(--s3) var(--s4); border: 1px solid var(--ok); border-radius: 6px; background: var(--ok-bg); overflow-wrap: anywhere; }
 
 #charge-result { overflow-wrap: anywhere; }
+#charge .copy-row select { width: auto; min-width: 96px; }
+#hook-current { color: var(--muted); }
+
+/* --- Integration ---------------------------------------------------------------------------------------- */
+.steps { padding-left: 1.4em; margin: var(--s3) 0; }
+.steps li { margin: var(--s2) 0; padding-left: var(--s1); }
+.steps li::marker { color: var(--gold-ink); font-weight: 700; }
+.tabs { display: flex; flex-wrap: wrap; gap: var(--s2); margin-top: var(--s3); }
+.tabs button { margin-top: 0; min-height: 36px; padding: var(--s1) var(--s3); }
+.tabs button[aria-pressed=true] { background: var(--stone); color: var(--on-stone); border-color: var(--stone); }
+.sample {
+    overflow: auto;
+    max-height: 440px;
+    margin: var(--s3) 0 0;
+    padding: var(--s4);
+    border-radius: 6px;
+    background: var(--stone);
+    color: var(--on-stone);
+    font-size: var(--t-xs);
+    line-height: 1.6;
+    white-space: pre;
+    scrollbar-color: var(--stone-2) transparent;
+}
+#hook-url { width: 100%; }
+
+.logo-preview { display: flex; align-items: center; gap: var(--s3); margin-top: var(--s2); }
+.logo-preview img { max-width: 160px; max-height: 64px; object-fit: contain; border: 1px solid var(--line); border-radius: 6px; padding: var(--s1); background: #fff; }
+
+@media (max-width: 560px) {
+    #payments, #payments tbody, #payments tr, #payments td,
+    #hook-deliveries, #hook-deliveries tbody, #hook-deliveries tr, #hook-deliveries td { display: block; }
+    #payments thead, #hook-deliveries thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+    #payments tr, #hook-deliveries tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--s1) var(--s3); padding: var(--s3) var(--s4); border-bottom: 1px solid var(--line); }
+    #payments tbody tr:last-child, #hook-deliveries tbody tr:last-child { border-bottom: 0; }
+    #payments td, #hook-deliveries td { padding: 0; border: 0; }
+    #payments td:nth-child(2) { grid-column: 1 / -1; grid-row: 2; }
+    #payments td:nth-child(3) { grid-row: 1; grid-column: 2; text-align: right; }
+    #hook-deliveries td:nth-child(2) { grid-column: 1 / -1; grid-row: 2; overflow-wrap: anywhere; color: var(--muted); }
+    .table-wrap { overflow-x: visible; }
+}
+
+.visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+@media (max-width: 640px) {
+    .shell-inner { flex-wrap: wrap; gap: 0 var(--s3); padding-top: var(--s2); }
+    .tabbar { order: 3; flex-basis: 100%; min-height: 44px; margin: 0 calc(-1 * var(--s4)); padding: 0 var(--s2); }
+    .tabbar { display: grid; grid-template-columns: repeat(4, auto); justify-content: space-between; overflow: visible; }
+    .tabbar [role=tab] { padding: 0 var(--s1); font-size: var(--t-sm); }
+    .card, .sheet { padding: var(--s4); }
+}

@@ -38,7 +38,7 @@
         TRX: "https://tronscan.org/#/transaction/",
         NILE: "https://nile.tronscan.org/#/transaction/"
     };
-    var STATUS = { pending: "Waiting", confirming: "Confirming", confirmed: "Paid", expired: "Expired" };
+    var STATUS = { choosing: "Choosing a coin", pending: "Waiting", confirming: "Seen", confirmed: "Confirmed", expired: "Expired" }; // same words as the checkout
 
     function $id(id) { return document.getElementById(id); }
 
@@ -81,6 +81,7 @@
         $id("content").hidden = true;
         $id("receive").hidden = true;
         $id("lock").hidden = true;
+        $id("tabs").hidden = true;
         $id("vault").hidden = false;
         $id("frame-status").hidden = false;
         frame.hidden = false;
@@ -123,6 +124,8 @@
         }
         $id("signing-in").hidden = true;
         $id("content").hidden = false;
+        $id("tabs").hidden = false;
+        showTab("overview");
         loadDashboard();
     }
 
@@ -170,7 +173,191 @@
     function loadDashboard() {
         loadBalances();
         loadPayments();
+        loadAccount();
     }
+
+    function showKeyInfo(hint, usedAt) {
+        $id("key-info").textContent = (hint ? "Your current key starts with " + hint + "…" : "Your key was made before key hints existed.") +
+            " Last used: " + (usedAt ? new Date(usedAt).toLocaleString() : "not yet") + ".";
+    }
+
+    async function loadAccount() {
+        try {
+            var me = await api("GET", "/accounts/me");
+            showKeyInfo(me.api_key_hint, me.api_key_used_at);
+            showHook(me.webhook_url);
+            $id("shop-name").value = me.shop_name || "";
+            shopLogo = undefined; // unchanged unless a file is picked or removed
+            $id("shop-logo-box").hidden = !me.has_logo;
+            if (me.logo) $id("shop-logo-preview").src = me.logo;
+        } catch (e) {
+            $id("key-info").textContent = "";
+        }
+        loadDeliveries();
+    }
+
+    // --- Shop name and logo -------------------------------------------------------------------------
+    var shopLogo; // undefined = keep, null = remove, "data:image/..." = new logo
+
+    $id("shop-logo").addEventListener("change", function () {
+        var file = this.files[0];
+        $id("shop-error").textContent = "";
+        if (!file) return;
+        if (["image/png", "image/jpeg"].indexOf(file.type) < 0 || file.size > 100000) {
+            $id("shop-error").textContent = "Pick a PNG or JPEG image of at most 100 KB.";
+            this.value = "";
+            return;
+        }
+        var reader = new FileReader();
+        reader.onload = function () {
+            shopLogo = reader.result;
+            $id("shop-logo-preview").src = shopLogo;
+            $id("shop-logo-box").hidden = false;
+        };
+        reader.readAsDataURL(file);
+    });
+    $id("shop-logo-remove").addEventListener("click", function () {
+        shopLogo = null;
+        $id("shop-logo").value = "";
+        $id("shop-logo-box").hidden = true;
+    });
+    $id("shop-save").addEventListener("click", async function () {
+        var button = this, body = { name: $id("shop-name").value.trim() };
+        if (shopLogo !== undefined) body.logo = shopLogo;
+        $id("shop-error").textContent = "";
+        $id("shop-result").textContent = "";
+        button.disabled = true;
+        try {
+            var r = await api("PUT", "/accounts/me/shop", body);
+            shopLogo = undefined;
+            $id("shop-result").textContent = "Saved. New checkout pages show " + (r.shop_name ? "“" + r.shop_name + "”" : "no name") +
+                (r.has_logo ? " with your logo." : " without a logo.");
+        } catch (e) {
+            $id("shop-error").textContent = e.message;
+        }
+        button.disabled = false;
+    });
+
+    // --- Webhooks and integration (docs/api.md#webhooks) ------------------------------------------
+    function showHook(url) {
+        $id("hook-current").textContent = url ? "Sending events to " + url : "No webhook set: your shop only learns about payments by asking the API.";
+        if (url) $id("hook-url").value = url;
+        $id("hook-test").hidden = !url;
+        $id("hook-remove").hidden = !url;
+    }
+
+    var DELIVERY = { delivered: "Delivered", queued: "Queued", retrying: "Retrying", failed: "Failed" };
+
+    async function loadDeliveries() {
+        var data;
+        try {
+            data = await api("GET", "/accounts/me/webhook/deliveries");
+        } catch (e) {
+            return;
+        }
+        var body = $id("hook-deliveries").querySelector("tbody");
+        body.textContent = "";
+        data.deliveries.forEach(function (d) {
+            var state = DELIVERY[d.status] || d.status;
+            if (d.last_error && d.status !== "delivered") state += " (" + d.last_error + ")";
+            body.appendChild(el("tr")).append(el("td", "", d.event), el("td", "", d.payment_id), el("td", "", state));
+        });
+        $id("hook-deliveries").hidden = !data.deliveries.length;
+        $id("hook-empty").hidden = !!data.deliveries.length;
+    }
+
+    async function hookAction(button, work) {
+        $id("hook-error").textContent = "";
+        $id("hook-result").textContent = "";
+        button.disabled = true;
+        try {
+            await work();
+        } catch (e) {
+            $id("hook-error").textContent = e.message;
+        }
+        button.disabled = false;
+    }
+
+    $id("hook-save").addEventListener("click", function () {
+        hookAction(this, async function () {
+            var r = await api("PUT", "/accounts/me/webhook", { url: $id("hook-url").value.trim() });
+            $id("hook-secret").value = r.secret;
+            $id("hook-secret-box").hidden = false;
+            showHook(r.url);
+        });
+    });
+    $id("hook-secret-copy").addEventListener("click", function () { copy("hook-secret", this); });
+    $id("hook-test").addEventListener("click", function () {
+        hookAction(this, async function () {
+            $id("hook-result").textContent = "Sending…";
+            var r = await api("POST", "/accounts/me/webhook/test");
+            $id("hook-result").textContent = r.delivered
+                ? "Your shop answered OK: test event delivered."
+                : "Not delivered: " + r.error + ". Check the URL, and that your server answers 2xx quickly.";
+        });
+    });
+    $id("hook-remove").addEventListener("click", function () {
+        hookAction(this, async function () {
+            await api("DELETE", "/accounts/me/webhook");
+            $id("hook-url").value = "";
+            $id("hook-secret-box").hidden = true;
+            showHook(null);
+        });
+    });
+
+    var sampleText = "";
+    async function showSample(file) {
+        document.querySelectorAll("[data-sample]").forEach(function (b) {
+            b.setAttribute("aria-pressed", String(b.dataset.sample === file));
+        });
+        try {
+            var res = await fetch("samples/" + file, { cache: "no-cache" });
+            if (!res.ok) throw new Error("HTTP " + res.status);
+            sampleText = (await res.text()).split("https://pay.example.com").join(location.origin);
+        } catch (e) {
+            sampleText = "Couldn't load the sample (" + e.message + ").";
+        }
+        $id("sample").firstElementChild.textContent = sampleText;
+    }
+    document.querySelectorAll("[data-sample]").forEach(function (b) {
+        b.addEventListener("click", function () { showSample(b.dataset.sample); });
+    });
+    // --- Sections (tabs) ----------------------------------------------------------------------------
+    var TABS = ["overview", "payments", "settings", "integration"];
+
+    function showTab(name, focus) {
+        TABS.forEach(function (t) {
+            var tab = $id("tab-" + t), on = t === name;
+            tab.setAttribute("aria-selected", String(on));
+            tab.tabIndex = on ? 0 : -1;
+            $id("panel-" + t).hidden = !on;
+            if (on && focus) tab.focus();
+        });
+        if (name === "integration") {
+            $id("api-base").textContent = location.origin;
+            if (!sampleText) showSample("python.py");
+        }
+    }
+    TABS.forEach(function (t, i) {
+        var tab = $id("tab-" + t);
+        tab.addEventListener("click", function () { showTab(t); });
+        tab.addEventListener("keydown", function (e) {  // tablist pattern: arrows move between sections
+            var step = { ArrowRight: 1, ArrowLeft: -1 }[e.key];
+            if (e.key === "Home") step = -i;
+            if (e.key === "End") step = TABS.length - 1 - i;
+            if (step === undefined) return;
+            e.preventDefault();
+            showTab(TABS[(i + step + TABS.length) % TABS.length], true);
+        });
+    });
+    $id("sample-copy").addEventListener("click", function () {
+        var button = this;
+        if (!navigator.clipboard) return;
+        navigator.clipboard.writeText(sampleText).then(function () {
+            button.textContent = "Copied";
+            setTimeout(function () { button.textContent = "Copy code"; }, 1500);
+        });
+    });
 
     async function loadBalances() {
         var list = $id("balances");
@@ -190,8 +377,8 @@
             var name = label(b.chain, b.asset);
             var li = el("li");
             var left = el("div");
-            left.append(el("div", "asset", name[0]), el("div", "network", name[1]));
-            var amount = el("div", "amount", (b.complete ? "" : "≥ ") + b.balance + " " + b.asset);
+            left.append(el("div", "asset", name[0]), el("div", "network mark", name[1]));
+            var amount = el("div", "amount" + (b.balance === "0" ? " zero" : ""), (b.complete ? "" : "≥ ") + b.balance + " " + b.asset);
             var buttons = el("div", "actions-cell");
             var button = el("button", "secondary", "Receive");
             button.type = "button";
@@ -222,39 +409,72 @@
         $id("receive").scrollIntoView({ block: "nearest" });
     }
 
+    var allPayments = [];
+    var drawnStatus = {}; // payment id -> status last drawn, to strike a hallmark only when it changes
+
     async function loadPayments() {
         var data;
         try {
-            data = await api("GET", "/payments?limit=20");
+            data = await api("GET", "/payments?limit=100");
         } catch (e) {
             return showError("Couldn't load payments (" + e.message + ").");
         }
+        allPayments = data.payments;
+        drawPayments();
+    }
+
+    function matches(p, query, status) {
+        if (status && p.status !== status) return false;
+        if (!query) return true;
+        return [p.id, p.reference, p.address, p.amount, p.price, p.asset, p.chain].some(function (v) {
+            return v && String(v).toLowerCase().indexOf(query) >= 0;
+        });
+    }
+
+    function drawPayments() {
+        var query = $id("pay-search").value.trim().toLowerCase(), status = $id("pay-filter").value;
+        var shown = allPayments.filter(function (p) { return matches(p, query, status); });
         var body = $id("payments").querySelector("tbody");
         body.textContent = "";
-        data.payments.forEach(function (p) {
+        shown.forEach(function (p) {
             var tr = el("tr");
             var created = el("td");
             var link = el("a", "", p.created_at.replace("T", " ").replace("Z", " UTC"));
             link.href = "/pay/" + encodeURIComponent(p.id);
             created.appendChild(link);
-            var name = label(p.chain, p.asset);
-            var state = STATUS[p.status] || p.status;
-            if (p.status === "expired" && p.amount_received !== "0") state += ", " + p.amount_received + " received";
-            var cell = el("td", "", state);
-            if (p.amount_received !== "0") {
+            var received = p.amount_received && p.amount_received !== "0"; // price requests have none yet
+            var cell = el("td");
+            var mark = el("span", "mark", STATUS[p.status] || p.status);
+            mark.dataset.state = p.status;
+            if (p.status === "confirmed") mark.classList.add("proven");
+            if (drawnStatus[p.id] && drawnStatus[p.id] !== p.status) mark.classList.add("struck"); // changed since last draw
+            drawnStatus[p.id] = p.status;
+            cell.appendChild(mark);
+            if (p.status === "expired" && received) mark.textContent += ", " + p.amount_received + " received";
+            if (received) {
                 var tx = el("a", "", "View");
                 tx.href = p.transactions.length === 1 ? p.transactions[0].url : p.address_url;
                 tx.target = "_blank";
                 tx.rel = "noopener noreferrer";
                 tx.setAttribute("aria-label", "View on the block explorer");
-                cell.append(" · ", tx);
+                cell.append(tx);
             }
-            tr.append(created, el("td", "num", p.amount + " " + name[0] + " on " + name[1]), cell);
+            var amountCell = el("td", "num");
+            if (p.chain) {
+                amountCell.append(p.amount + " " + label(p.chain, p.asset)[0] + " on ", el("span", "mark", label(p.chain, p.asset)[1]));
+                if (p.price) amountCell.append(" = " + p.price + " " + p.currency);
+            } else {
+                amountCell.append(p.price + " " + p.currency + " (payer picks the coin)");
+            }
+            tr.append(created, amountCell, cell);
             body.appendChild(tr);
         });
-        $id("payments").hidden = !data.payments.length;
-        $id("payments-empty").hidden = !!data.payments.length;
+        $id("payments").hidden = !shown.length;
+        $id("payments-empty").hidden = !!allPayments.length;
+        $id("payments-nomatch").hidden = !allPayments.length || !!shown.length;
     }
+    $id("pay-search").addEventListener("input", drawPayments);
+    $id("pay-filter").addEventListener("change", drawPayments);
 
     // --- New payment: what a shop does with POST /payments, here with the wallet session ---------------
     function fillChargeNetworks(balances) {
@@ -269,18 +489,29 @@
         if (!select.value && select.options.length) select.selectedIndex = 0;
     }
 
+    $id("charge-unit").addEventListener("change", function () {
+        var priced = this.value !== "coin";
+        $id("charge-network-box").hidden = priced;
+        $id("charge-priced-note").hidden = !priced;
+    });
+
     $id("charge-create").addEventListener("click", async function () {
-        var button = this, pair = $id("charge-network").value.split("/");
+        var button = this, pair = $id("charge-network").value.split("/"), unit = $id("charge-unit").value;
+        var amount = $id("charge-amount").value.trim();
         $id("charge-error").textContent = "";
         $id("charge-result").hidden = true;
         button.disabled = true;
         try {
-            var p = await api("POST", "/payments", { chain: pair[0], asset: pair[1], amount: $id("charge-amount").value.trim() });
+            var p = await api("POST", "/payments", unit === "coin"
+                ? { chain: pair[0], asset: pair[1], amount: amount }
+                : { price: amount, currency: unit });
             var link = el("a", "", "Open the checkout page");
             link.href = "/pay/" + encodeURIComponent(p.id);
             link.target = "_blank";
             link.rel = "noopener";
-            $id("charge-result").replaceChildren("Payment created: " + p.amount + " " + p.asset + " to " + p.address + ". ", link);
+            $id("charge-result").replaceChildren("Payment created: " + (p.chain
+                ? p.amount + " " + p.asset + " to " + p.address
+                : p.price + " " + p.currency + ", the payer picks the coin") + ". ", link);
             $id("charge-result").hidden = false;
             loadPayments();
         } catch (e) {
@@ -488,6 +719,7 @@
             var r = await api("POST", "/accounts/me/api-key");
             $id("new-key-value").value = r.api_key;
             $id("new-key-box").hidden = false;
+            showKeyInfo(r.api_key.slice(0, 7), null);
         } catch (e) {
             showError("Couldn't make a new API key (" + e.message + ").");
         }

@@ -3,7 +3,6 @@ import re
 
 from conftest import PHRASE, frame, import_wallet, set_password
 
-BTC_FIRST = "1LqBGSKuX5yYUonjxT5qGfpUsXKYYWeabA"  # m/44'/0'/0'/0/0 of PHRASE (BIP39 test vector)
 
 
 def test_create_wallet_confirms_backup_and_gets_api_key(page):
@@ -37,13 +36,18 @@ def test_create_wallet_confirms_backup_and_gets_api_key(page):
 
 
 def test_import_phrase_then_restore_on_another_device(page, browser, server):
-    key = import_wallet(page)
+    # Account 7 of the test phrase: used by no other test, so this import is always the first one.
+    from bip_utils import Bip39SeedGenerator, Bip44, Bip44Changes, Bip44Coins
+    seed = Bip39SeedGenerator(PHRASE).Generate()
+    first = (Bip44.FromSeed(seed, Bip44Coins.BITCOIN).Purpose().Coin().Account(7)
+             .Change(Bip44Changes.CHAIN_EXT).AddressIndex(0).PublicKey().ToAddress())
+    key = import_wallet(page, account=7)
     assert key and key.startswith("gw_")
-    assert BTC_FIRST in page.locator("#addresses").inner_text(), "addresses match other wallets (BIP44)"
+    assert first in page.locator("#addresses").inner_text(), "addresses match other wallets (BIP44)"
 
     other = browser.new_context(base_url=server).new_page()
     try:
-        assert import_wallet(other) is None
+        assert import_wallet(other, account=7) is None
         assert other.is_visible("#restored"), "same phrase again = restore, never a second account"
     finally:
         other.context.close()

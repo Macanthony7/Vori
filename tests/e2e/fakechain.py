@@ -10,6 +10,10 @@ import chain_client
 
 class FakeChain:
     def __init__(self):
+        self.reset()
+
+    def reset(self):
+        """Empty chain: every test starts without coins left over by another test."""
         self.received = {}      # (chain, asset, address) -> (seen, confirmed), smallest units
         self.balances = {}      # (chain, asset, address) -> current balance (wallet view)
         self.utxos = {}         # (chain, address) -> [{tx_hash, vout, value, confirmations}]

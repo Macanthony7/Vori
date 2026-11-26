@@ -53,6 +53,12 @@ def chain():
     return fake
 
 
+@pytest.fixture(autouse=True)
+def clean_chain(chain):
+    chain.reset()
+    app_module._balance_cache.clear()
+
+
 @pytest.fixture(scope="session")
 def server(chain):
     db.init()
@@ -139,9 +145,17 @@ def set_password(f, password=PASSWORD):
     f.locator("#p-done").click()
 
 
+def tab(pg, name):
+    """Open a wallet section: overview, payments, settings or integration."""
+    pg.click(f"#tab-{name}")
+    pg.wait_for_selector(f"#panel-{name}:not([hidden])")
+
+
 def unlock(pg, password=PASSWORD):
     pg.goto("/wallet.html")
     f = frame(pg)
     f.locator("#u-pass").fill(password)
     f.locator("#u-done").click()
-    pg.wait_for_selector("#content:not([hidden])")
+    # 600,000 PBKDF2 rounds + signature sign-in: slow on a busy machine (coverage, parallel browsers).
+    pg.wait_for_selector("#content:not([hidden])", timeout=90_000)
+    pg.locator("#balances li .amount").first.wait_for(timeout=60_000)  # balances loaded, not "Checking…"

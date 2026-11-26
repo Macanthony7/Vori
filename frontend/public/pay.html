@@ -6,6 +6,7 @@
     <meta name="referrer" content="no-referrer">
     <meta name="robots" content="noindex">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
     <title>Payment</title>
     <!-- Absolute paths: this page is served at /pay/{id} -->
     <link rel="stylesheet" href="/styles.css">
@@ -13,15 +14,38 @@
 </head>
 <body>
 <main class="pay">
-    <p id="loading" class="lede">Loading payment…</p>
+    <p id="loading" class="loading-card" role="status">Loading payment…</p>
     <p id="not-found" class="error" role="alert" hidden>This payment doesn't exist. Check the link, or ask the merchant for a new one.</p>
 
-    <section id="payment" hidden>
+    <div id="shop" class="shop" hidden>
+        <img id="shop-logo" alt="" hidden>
+        <span>Payment to <strong id="shop-name"></strong></span>
+    </div>
+
+    <section id="choose" hidden>
         <header>
-            <p class="lede" id="heading">Send exactly</p>
-            <p class="amount"><span id="amount"></span> <span id="asset"></span></p>
-            <p class="network">on <strong id="network"></strong></p>
+            <p class="lede">Amount to pay</p>
+            <p class="amount" id="price"></p>
         </header>
+        <h2 id="choose-title">Choose how to pay</h2>
+        <div id="options" class="pay-options" role="group" aria-labelledby="choose-title"></div>
+        <p class="error" id="choose-error" role="alert"></p>
+        <p class="note" id="choose-note">The amount is fixed when you choose. You then have 30 minutes to send it.</p>
+    </section>
+
+    <section id="payment" hidden>
+        <header class="due">
+            <p class="due-label" id="heading">Send exactly</p>
+            <p class="amount"><span id="amount"></span> <span id="asset" class="unit"></span></p>
+            <p class="network">on <strong id="network" class="mark"></strong></p>
+        </header>
+
+        <!-- Progress as hallmarks, struck one by one as the payment is seen and confirmed -->
+        <ol id="progress" class="progress" aria-label="Payment progress">
+            <li class="mark" data-step="waiting">Waiting</li>
+            <li class="mark" data-step="seen">Seen</li>
+            <li class="mark" data-step="confirmed">Confirmed</li>
+        </ol>
 
         <p id="status" class="status" role="status" aria-live="polite"></p>
         <p id="tx-link" class="note" hidden><a target="_blank" rel="noopener noreferrer">View on the block explorer</a></p>
@@ -46,6 +70,7 @@
             <p id="network-warning" class="warning"></p>
         </div>
 
+        <p id="back" class="back" hidden><a id="back-link"></a></p>
         <p class="note">Payment <code id="payment-id"></code></p>
     </section>
 </main>

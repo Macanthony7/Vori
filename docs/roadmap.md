@@ -32,7 +32,7 @@ Focus: **the engine first**. Revenue features wait until it's solid.
 | 7 | **"Paid late" detection** | Funds arriving after `expired` were invisible | **Done:** the watcher keeps checking expired payments for 24 h (every 15 min) and sends `payment.paid_late`; after that, "Check all payment addresses" on the wallet page (`POST /wallet/scan`). See [api.md](api.md#payment-statuses). |
 | 8 | **Stop reusing addresses** | Payers never see a repeated address | **Done:** every payment gets a new address. No opt-in (decided): merchants who use another wallet raise its gap limit ([api.md](api.md#address-assignment)). Add a per-account setting if someone needs it. |
 | 9 | Rate limiting | Abuse, provider quota | **Done:** in-memory sliding windows per IP (sign-up, login, checkout) and per account (payments, wallet). See [api.md](api.md#rate-limits). |
-| 10 | BlockCypher push hooks | Save BTC/LTC/DOGE quota | See [BlockCypher push hooks](#blockcypher-push-hooks). |
+| 10 | BlockCypher push hooks | Save BTC/LTC/DOGE quota | **Done:** see [BlockCypher push hooks](#blockcypher-push-hooks). |
 | 11 | Encrypt xpubs at rest | DB-only leaks | **Done:** xpubs and webhook secrets, AES-256-GCM with `GATEWAY_DB_KEY`. See [security.md](security.md#database). Later: key rotation. |
 
 ### Reference: Gem Wallet
@@ -121,14 +121,22 @@ Explorer links the prototype used:
 
 ## BlockCypher push hooks
 
-Instead of polling BTC/LTC/DOGE addresses every 60 s, BlockCypher can call us:
-`POST https://api.blockcypher.com/v1/{btc|ltc|doge}/main/hooks?token=…` with
-`{"event": "unconfirmed-tx", "address": "<address>", "url": "<our endpoint>"}`.
+**Built.** With `BLOCKCYPHER_TOKEN` set and an `https://` `GATEWAY_PUBLIC_URL`, the watcher creates one
+hook per open BTC/LTC/DOGE payment: `POST /v1/{coin}/main/hooks?token=…` with
+`{"event": "tx-confirmation", "address": …, "url": "<GATEWAY_PUBLIC_URL>/hooks/blockcypher/<payment id>?t=<secret>", "confirmations": N}`
+(N = the payment's required confirmations, at most 10). BlockCypher calls back when the transaction is first
+seen and on each confirmation.
 
-The hook should only tell the watcher to check that payment now. It must **never** be trusted as
-proof of payment, because anyone can call our endpoint. The watcher's own observation stays the
-source of truth. Delete the hook when the payment is final, because BlockCypher limits active hooks
-per token.
+- The callback (`POST /hooks/blockcypher/{id}`) is **never trusted as proof**: anyone can call a URL. With
+  the right secret (`t`, derived from `GATEWAY_DB_KEY`, different per payment) it only makes the watcher check
+  that payment on its next pass; a wrong one gets 404. The watcher's own reading stays the source of truth.
+- While a hook is active, that payment is polled every 10 minutes instead of every 60 s (the fallback if
+  callbacks stop). If a hook can't be made (free plan: 100 stored hooks, 100 callbacks an hour), the payment
+  keeps normal polling.
+- Hooks are deleted when the payment is confirmed, or 24 h after it expired (the late-payment watch), and
+  retried until BlockCypher confirms. Turn them off with `GATEWAY_BLOCKCYPHER_HOOKS=0`.
+- Not yet checked against the live API (needs a token): the exact required fields and whether the first
+  callback comes at 0 confirmations. Polling covers either way; check once on staging.
 
 ## Operations: queries worth alerting on
 

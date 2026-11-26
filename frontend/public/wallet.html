@@ -5,23 +5,33 @@
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-src 'self'; form-action 'none'; base-uri 'none'">
     <meta name="referrer" content="no-referrer">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
     <title>Your wallet</title>
     <link rel="stylesheet" href="styles.css">
     <link rel="stylesheet" href="wallet.css">
 </head>
-<body>
-<main>
-    <header class="wallet-head">
-        <h1>Your wallet</h1>
-        <button type="button" id="lock" class="secondary" hidden>Lock</button>
-    </header>
+<body class="app">
+<header class="shell">
+    <div class="shell-inner">
+        <h1 class="brand"><span class="brand-mark" aria-hidden="true"></span>Your wallet</h1>
+        <nav class="tabbar" id="tabs" role="tablist" aria-label="Wallet sections" hidden>
+            <button type="button" role="tab" id="tab-overview" aria-controls="panel-overview" aria-selected="true">Overview</button>
+            <button type="button" role="tab" id="tab-payments" aria-controls="panel-payments" aria-selected="false" tabindex="-1">Payments</button>
+            <button type="button" role="tab" id="tab-settings" aria-controls="panel-settings" aria-selected="false" tabindex="-1">Settings</button>
+            <button type="button" role="tab" id="tab-integration" aria-controls="panel-integration" aria-selected="false" tabindex="-1">Integration</button>
+        </nav>
+        <button type="button" id="lock" class="shell-button" hidden>Lock</button>
+    </div>
+</header>
 
-    <section id="none" hidden>
-        <p>No wallet is saved on this device.</p>
+<main class="app-main">
+    <section id="none" class="narrow" hidden>
+        <h2>No wallet on this device</h2>
+        <p>This browser has no saved wallet. Your funds are on the blockchain, not here: set the wallet up again with its recovery phrase.</p>
         <p><a href="./">Create a wallet, or restore one with your recovery phrase</a></p>
     </section>
 
-    <section id="vault" hidden>
+    <section id="vault" class="narrow" hidden>
         <p id="frame-status" class="note" role="status">Loading the secure wallet window…</p>
         <!-- Same offline, sandboxed frame as signup. The password and the unlocked keys stay inside it.
              It stays loaded (hidden) while the dashboard is open: it holds the keys for signing. -->
@@ -35,90 +45,205 @@
     </section>
 
     <section id="dashboard" hidden>
-        <p id="signing-in" class="note" role="status">Signing in…</p>
+        <p id="signing-in" class="note loading" role="status">Signing in…</p>
 
         <div id="content" hidden>
-            <div class="section-head">
-                <h2>Balances</h2>
-                <button type="button" id="refresh" class="link">Refresh</button>
-            </div>
-            <ul id="balances" class="balances"></ul>
-            <p id="balances-note" class="note" hidden>Some networks couldn't be checked right now, so those balances may be higher. Try Refresh in a minute.</p>
-            <p class="note">Someone paid long after a payment expired? <button type="button" id="scan" class="link">Check all payment addresses</button></p>
-            <p id="scan-result" class="note" role="status" hidden></p>
+            <!-- Overview: what you hold, and making a payment -->
+            <section id="panel-overview" class="panel-tab" role="tabpanel" aria-labelledby="tab-overview">
+                <div class="overview">
+                    <div class="overview-main">
+                        <div class="section-head">
+                            <h2>Balances</h2>
+                            <button type="button" id="refresh" class="link">Refresh</button>
+                        </div>
+                        <ul id="balances" class="balances" aria-live="polite"></ul>
+                        <p id="balances-note" class="note" hidden>Some networks couldn't be checked right now, so those balances may be higher. Try Refresh in a minute.</p>
+                        <p class="note">Someone paid long after a payment expired? <button type="button" id="scan" class="link">Check all payment addresses</button></p>
+                        <p id="scan-result" class="note" role="status" hidden></p>
 
-            <section id="receive" class="receive" hidden aria-labelledby="receive-title">
-                <div class="section-head">
-                    <h2 id="receive-title">Receive</h2>
-                    <button type="button" id="receive-close" class="link">Close</button>
+                        <section id="receive" class="sheet" hidden aria-labelledby="receive-title">
+                            <div class="section-head">
+                                <h2 id="receive-title">Receive</h2>
+                                <button type="button" id="receive-close" class="link">Close</button>
+                            </div>
+                            <p>Your main address on <strong id="receive-network"></strong>. Also where gas for sending goes.</p>
+                            <div id="receive-qr" class="qr" aria-hidden="true"></div>
+                            <div class="copy-row">
+                                <textarea id="receive-address" rows="2" readonly spellcheck="false" aria-label="Your main address"></textarea>
+                                <button type="button" id="receive-copy">Copy</button>
+                            </div>
+                            <p id="receive-warning" class="warning"></p>
+                        </section>
+
+                        <section id="send" class="sheet" hidden aria-labelledby="send-title">
+                            <div class="section-head">
+                                <h2 id="send-title">Send</h2>
+                                <button type="button" id="send-close" class="link">Close</button>
+                            </div>
+                            <p>From your whole <strong id="send-network"></strong> balance. You'll check everything in the secure window before anything is signed.</p>
+                            <label for="send-to">To address</label>
+                            <input id="send-to" autocomplete="off" spellcheck="false" autocapitalize="off">
+                            <label for="send-amount">Amount</label>
+                            <input id="send-amount" inputmode="decimal" autocomplete="off">
+                            <label class="check"><input type="checkbox" id="send-max"> Send everything (the fee comes out of it)</label>
+                            <div id="send-speed-box">
+                                <label for="send-speed">Network fee</label>
+                                <select id="send-speed">
+                                    <option value="slow">Slow (cheapest)</option>
+                                    <option value="normal" selected>Normal</option>
+                                    <option value="fast">Fast</option>
+                                </select>
+                            </div>
+                            <p class="error" id="send-error" role="alert"></p>
+                            <button type="button" id="send-review">Review in the secure window</button>
+                        </section>
+
+                        <p id="send-result" class="status-good" role="status" hidden></p>
+                    </div>
+
+                    <aside class="overview-side">
+                        <section id="charge" class="card" aria-labelledby="charge-title">
+                            <h2 id="charge-title">New payment</h2>
+                            <p class="note">Make a payment request and open its checkout page, like your shop does with the API. Each one gets a fresh address.</p>
+                            <label for="charge-amount">Amount</label>
+                            <div class="copy-row">
+                                <input id="charge-amount" inputmode="decimal" autocomplete="off" placeholder="0.00">
+                                <select id="charge-unit" aria-label="Amount in">
+                                    <option value="coin" selected>Coin</option>
+                                    <option value="USD">USD</option>
+                                    <option value="EUR">EUR</option>
+                                </select>
+                            </div>
+                            <div id="charge-network-box">
+                                <label for="charge-network">Coin and network</label>
+                                <select id="charge-network"></select>
+                            </div>
+                            <p id="charge-priced-note" class="note" hidden>The payer picks any coin you can receive. The amount is converted at the current rate when they choose.</p>
+                            <p class="error" id="charge-error" role="alert"></p>
+                            <button type="button" id="charge-create">Create checkout</button>
+                            <p id="charge-result" class="status-good" role="status" hidden></p>
+                        </section>
+                    </aside>
                 </div>
-                <p>Your main address on <strong id="receive-network"></strong>. Also where gas for sending goes.</p>
-                <div id="receive-qr" class="qr" aria-hidden="true"></div>
-                <div class="copy-row">
-                    <textarea id="receive-address" rows="2" readonly spellcheck="false"></textarea>
-                    <button type="button" id="receive-copy">Copy</button>
-                </div>
-                <p id="receive-warning" class="warning"></p>
             </section>
 
-            <section id="send" class="receive" hidden aria-labelledby="send-title">
+            <!-- Payments: every payment request, searchable -->
+            <section id="panel-payments" class="panel-tab" role="tabpanel" aria-labelledby="tab-payments" hidden>
                 <div class="section-head">
-                    <h2 id="send-title">Send</h2>
-                    <button type="button" id="send-close" class="link">Close</button>
+                    <h2>Payments</h2>
                 </div>
-                <p>From your whole <strong id="send-network"></strong> balance. You'll check everything in the secure window before anything is signed.</p>
-                <label for="send-to">To address</label>
-                <input id="send-to" autocomplete="off" spellcheck="false" autocapitalize="off">
-                <label for="send-amount">Amount</label>
-                <input id="send-amount" inputmode="decimal" autocomplete="off">
-                <label class="check"><input type="checkbox" id="send-max"> Send everything (the fee comes out of it)</label>
-                <div id="send-speed-box">
-                    <label for="send-speed">Network fee</label>
-                    <select id="send-speed">
-                        <option value="slow">Slow (cheapest)</option>
-                        <option value="normal" selected>Normal</option>
-                        <option value="fast">Fast</option>
+                <div class="filters">
+                    <label for="pay-search" class="visually-hidden">Search payments</label>
+                    <input id="pay-search" type="search" placeholder="Search by id, order reference, address or amount" autocomplete="off" spellcheck="false">
+                    <label for="pay-filter" class="visually-hidden">Status</label>
+                    <select id="pay-filter">
+                        <option value="">All statuses</option>
+                        <option value="choosing">Choosing a coin</option>
+                        <option value="pending">Waiting</option>
+                        <option value="confirming">Seen</option>
+                        <option value="confirmed">Confirmed</option>
+                        <option value="expired">Expired</option>
                     </select>
                 </div>
-                <p class="error" id="send-error" role="alert"></p>
-                <button type="button" id="send-review">Review</button>
+                <div id="payments-empty" class="empty" hidden>
+                    <h3>No payments yet</h3>
+                    <p>Payments your shop creates through the API show up here, and so do the ones you make with <strong>New payment</strong> on the Overview tab.</p>
+                </div>
+                <p id="payments-nomatch" class="note" hidden>No payments match. Clear the search or pick another status.</p>
+                <div class="table-wrap">
+                    <table id="payments" hidden>
+                        <thead><tr><th scope="col">Created</th><th scope="col">Amount</th><th scope="col">Status</th></tr></thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
             </section>
 
-            <p id="send-result" class="status-good" role="status" hidden></p>
-
-            <details id="charge">
-                <summary>New payment (checkout page)</summary>
-                <p>Make a payment request and open its checkout page, like your shop would with the API. Each one gets a fresh address.</p>
-                <label for="charge-amount">Amount</label>
-                <input id="charge-amount" inputmode="decimal" autocomplete="off">
-                <label for="charge-network">Coin and network</label>
-                <select id="charge-network"></select>
-                <p class="error" id="charge-error" role="alert"></p>
-                <button type="button" id="charge-create">Create checkout</button>
-                <p id="charge-result" class="status-good" role="status" hidden></p>
-            </details>
-
-            <h2>Recent payments</h2>
-            <p id="payments-empty" class="note" hidden>No payments yet.</p>
-            <div class="table-wrap">
-                <table id="payments" hidden>
-                    <thead><tr><th>Created</th><th>Amount</th><th>Status</th></tr></thead>
-                    <tbody></tbody>
-                </table>
-            </div>
-
-            <details>
-                <summary>API key</summary>
-                <p>Your shop uses an API key to create payments. Lost it? Make a new one: the old key stops working immediately.</p>
-                <button type="button" id="new-key" class="secondary">Make a new API key</button>
-                <div id="new-key-box" hidden>
-                    <div class="copy-row">
-                        <input id="new-key-value" readonly>
-                        <button type="button" id="new-key-copy">Copy</button>
+            <!-- Settings: what payers see, how the shop is told, the API key -->
+            <section id="panel-settings" class="panel-tab" role="tabpanel" aria-labelledby="tab-settings" hidden>
+                <section id="shop-settings" class="card" aria-labelledby="shop-title">
+                    <h2 id="shop-title">Shop name and logo</h2>
+                    <p class="note">Payers see these at the top of the checkout page, so they know who they're paying.</p>
+                    <label for="shop-name">Shop name</label>
+                    <input id="shop-name" maxlength="60" autocomplete="organization">
+                    <label for="shop-logo">Logo (PNG or JPEG, up to 100 KB)</label>
+                    <input id="shop-logo" type="file" accept="image/png,image/jpeg">
+                    <div id="shop-logo-box" class="logo-preview" hidden>
+                        <img id="shop-logo-preview" alt="Your logo">
+                        <button type="button" id="shop-logo-remove" class="link">Remove logo</button>
                     </div>
-                    <p class="warning">Save it now and update your shop. It's shown only once.</p>
-                </div>
-            </details>
+                    <p class="error" id="shop-error" role="alert"></p>
+                    <button type="button" id="shop-save">Save</button>
+                    <p id="shop-result" class="note" role="status"></p>
+                </section>
+
+                <section id="webhooks" class="card" aria-labelledby="hooks-title">
+                    <h2 id="hooks-title">Webhooks</h2>
+                    <p class="note">When a payment changes status, we send a signed message to your shop's server, so it can mark the order paid.</p>
+                    <p id="hook-current"></p>
+                    <label for="hook-url">Webhook URL</label>
+                    <input id="hook-url" type="url" inputmode="url" placeholder="https://yourshop.com/hooks/crypto" autocomplete="off" spellcheck="false" autocapitalize="off">
+                    <p class="error" id="hook-error" role="alert"></p>
+                    <div class="actions">
+                        <button type="button" id="hook-save">Save</button>
+                        <button type="button" id="hook-test" class="secondary" hidden>Send test event</button>
+                        <button type="button" id="hook-remove" class="secondary" hidden>Remove</button>
+                    </div>
+                    <div id="hook-secret-box" hidden>
+                        <label for="hook-secret">Signing secret</label>
+                        <div class="copy-row">
+                            <input id="hook-secret" readonly>
+                            <button type="button" id="hook-secret-copy">Copy</button>
+                        </div>
+                        <p class="warning">Put it in your shop's server settings now. It's shown only once; saving the URL again makes a new one.</p>
+                    </div>
+                    <p id="hook-result" class="note" role="status"></p>
+                    <h3>Recent deliveries</h3>
+                    <p id="hook-empty" class="note">None yet. Events appear here as payments change status.</p>
+                    <div class="table-wrap">
+                        <table id="hook-deliveries" hidden>
+                            <thead><tr><th scope="col">Event</th><th scope="col">Payment</th><th scope="col">Status</th></tr></thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <section id="api-key-card" class="card" aria-labelledby="key-title">
+                    <h2 id="key-title">API key</h2>
+                    <p>Your shop uses an API key to create payments. Lost it? Make a new one: the old key stops working immediately.</p>
+                    <p id="key-info" class="note"></p>
+                    <p class="note">Keep the key on your shop's server only, never in web pages or apps. A leaked key can create and read payments, but can't move funds or change these settings: those need this wallet.</p>
+                    <button type="button" id="new-key" class="secondary">Make a new API key</button>
+                    <div id="new-key-box" hidden>
+                        <div class="copy-row">
+                            <input id="new-key-value" readonly aria-label="New API key">
+                            <button type="button" id="new-key-copy">Copy</button>
+                        </div>
+                        <p class="warning">Save it now and update your shop. It's shown only once.</p>
+                    </div>
+                </section>
+            </section>
+
+            <!-- Integration: connecting a shop -->
+            <section id="panel-integration" class="panel-tab" role="tabpanel" aria-labelledby="tab-integration" hidden>
+                <section id="integration" class="card" aria-labelledby="integration-title">
+                    <h2 id="integration-title">Connect your shop</h2>
+                    <ol class="steps">
+                        <li>Put your API key in your shop's <strong>server</strong> settings (an environment variable such as <code>GATEWAY_API_KEY</code>). Never in web pages or apps.</li>
+                        <li>When a customer checks out, your server creates a payment and sends the customer to its <code>checkout_url</code>.</li>
+                        <li>Set a webhook in Settings. When it says <code>payment.confirmed</code>, check the signature and mark the order paid.</li>
+                    </ol>
+                    <p>API address: <code id="api-base"></code></p>
+                    <div class="tabs" role="group" aria-label="Code sample language">
+                        <button type="button" class="secondary" data-sample="python.py" aria-pressed="true">Python</button>
+                        <button type="button" class="secondary" data-sample="node.js" aria-pressed="false">Node.js</button>
+                        <button type="button" class="secondary" data-sample="php.php" aria-pressed="false">PHP</button>
+                        <button type="button" class="secondary" data-sample="curl.sh" aria-pressed="false">curl</button>
+                    </div>
+                    <pre id="sample" class="sample" tabindex="0" aria-label="Code sample"><code></code></pre>
+                    <button type="button" id="sample-copy" class="secondary">Copy code</button>
+                    <p class="note">Every sample is tested against the gateway. Full reference: the API docs in the gateway's <code>docs/api.md</code>.</p>
+                </section>
+            </section>
         </div>
     </section>
 
