@@ -1,0 +1,9 @@
+# /etc/caddy/Caddyfile. Replace YOUR_DOMAIN (e.g. myshop-pay.duckdns.org). Caddy gets and renews the
+# HTTPS certificate itself. Guide: docs/deploy.md
+YOUR_DOMAIN {
+	encode gzip
+	header Strict-Transport-Security "max-age=31536000"
+	# The app listens on localhost only. Caddy adds the visitor's IP to X-Forwarded-For
+	# (GATEWAY_TRUST_PROXY=1 reads it for rate limits).
+	reverse_proxy 127.0.0.1:8000
+}

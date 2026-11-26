@@ -2,18 +2,68 @@
 
 Schema reference: docs/architecture.md#data-model
 """
+import base64
+import hashlib
+import hmac
+import logging
 import os
+import secrets
 import sqlite3
 from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from dotenv import load_dotenv
 
 HERE = Path(__file__).parent
 load_dotenv(HERE / ".env")  # every module imports db first; real environment variables win
 # ponytail: SQLite (stdlib) for the MVP; move to Postgres/MySQL when running more than one server process.
 DB_PATH = os.getenv("GATEWAY_DB", str(HERE / "gateway.db"))
+
+
+# --- Secrets at rest: xpubs and webhook secrets are AES-256-GCM encrypted with GATEWAY_DB_KEY, which
+# lives in the environment / backend/.env, never in the database. A copy of gateway.db alone then
+# doesn't reveal merchants' wallets or let anyone forge webhooks. Docs: docs/security.md#database
+def _master_key():
+    text = os.getenv("GATEWAY_DB_KEY", "")
+    if not text:
+        # First start: make one and save it next to the code (backend/.env, gitignored).
+        text = secrets.token_hex(32)
+        with open(HERE / ".env", "a", encoding="utf-8") as f:
+            f.write(f"\n# Encrypts xpubs and webhook secrets in the database. Back it up apart from gateway.db:\n"
+                    f"# without it the stored xpubs can't be read.\nGATEWAY_DB_KEY={text}\n")
+        os.environ["GATEWAY_DB_KEY"] = text
+        logging.getLogger("db").warning("generated GATEWAY_DB_KEY in backend/.env; back it up apart from the database")
+    key = bytes.fromhex(text)
+    if len(key) != 32:
+        raise RuntimeError("GATEWAY_DB_KEY must be 64 hex characters (32 bytes)")
+    return key
+
+
+_MASTER = _master_key()
+_ENC = AESGCM(hmac.digest(_MASTER, b"gateway-db-encrypt", hashlib.sha256))
+_TAG = hmac.digest(_MASTER, b"gateway-db-lookup", hashlib.sha256)
+SEALED = "v1:"
+
+
+def seal(text, label):
+    """Encrypt `text`; `label` (e.g. "xpub") binds it to its column so values can't be swapped."""
+    nonce = os.urandom(12)
+    return SEALED + base64.b64encode(nonce + _ENC.encrypt(nonce, text.encode(), label.encode())).decode()
+
+
+def unseal(blob, label):
+    if blob is None:
+        return None
+    raw = base64.b64decode(blob[len(SEALED):])
+    return _ENC.decrypt(raw[:12], raw[12:], label.encode()).decode()  # raises if the key is wrong
+
+
+def tag(text):
+    """Deterministic keyed hash, for finding and de-duplicating xpubs without storing them in clear."""
+    return hmac.new(_TAG, text.encode(), hashlib.sha256).hexdigest()
+
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS accounts (
@@ -23,15 +73,17 @@ CREATE TABLE IF NOT EXISTS accounts (
     plan_expires_at TEXT,
     created_at      TEXT NOT NULL,
     webhook_url     TEXT,
-    webhook_secret  TEXT                       -- HMAC key for webhook signatures (must be stored to sign)
+    webhook_secret  TEXT                       -- HMAC key for webhook signatures, sealed (must be stored to sign)
 );
 CREATE TABLE IF NOT EXISTS account_xpubs (
     account_id  INTEGER NOT NULL REFERENCES accounts(id),
     chain       TEXT NOT NULL,                 -- xpub family: BTC, LTC, DOGE, ETH (also BSC), TRX
-    xpub        TEXT NOT NULL UNIQUE,          -- normalized account xpub
+    xpub        TEXT NOT NULL,                 -- normalized account xpub, sealed (seal(x, "xpub"))
+    xpub_tag    TEXT,                          -- tag(xpub): login lookup and "already registered"
     next_index  INTEGER NOT NULL DEFAULT 0,    -- next never-used receive address index
     PRIMARY KEY (account_id, chain)
 );
+CREATE UNIQUE INDEX IF NOT EXISTS account_xpubs_tag ON account_xpubs(xpub_tag);
 CREATE TABLE IF NOT EXISTS payments (
     id                  TEXT PRIMARY KEY,      -- "pay_..."
     account_id          INTEGER NOT NULL REFERENCES accounts(id),
@@ -49,7 +101,8 @@ CREATE TABLE IF NOT EXISTS payments (
     expires_at          TEXT NOT NULL,
     confirmed_at        TEXT,
     updated_at          TEXT NOT NULL,
-    next_check_at       TEXT NOT NULL
+    next_check_at       TEXT NOT NULL,
+    tx_hashes           TEXT NOT NULL DEFAULT '[]'  -- JSON list of incoming transaction hashes, oldest first
 );
 CREATE INDEX IF NOT EXISTS payments_due ON payments(status, next_check_at);
 CREATE INDEX IF NOT EXISTS payments_account ON payments(account_id, created_at);
@@ -78,7 +131,8 @@ CREATE TABLE IF NOT EXISTS sessions (
 """
 
 # Columns added after 0.1.0; CREATE TABLE IF NOT EXISTS won't add them to an existing database.
-MIGRATIONS = [("accounts", "webhook_url", "TEXT"), ("accounts", "webhook_secret", "TEXT")]
+MIGRATIONS = [("accounts", "webhook_url", "TEXT"), ("accounts", "webhook_secret", "TEXT"),
+              ("payments", "tx_hashes", "TEXT NOT NULL DEFAULT '[]'"), ("account_xpubs", "xpub_tag", "TEXT")]
 
 
 def connect():
@@ -97,6 +151,14 @@ def init():
             if exists and column not in cols:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {kind}")
         conn.executescript(SCHEMA)
+        # Encrypt anything stored before encryption existed (idempotent: sealed values start with v1:).
+        with conn:
+            for r in conn.execute("SELECT account_id, chain, xpub FROM account_xpubs WHERE xpub NOT LIKE 'v1:%'").fetchall():
+                conn.execute("UPDATE account_xpubs SET xpub = ?, xpub_tag = ? WHERE account_id = ? AND chain = ?",
+                             (seal(r["xpub"], "xpub"), tag(r["xpub"]), r["account_id"], r["chain"]))
+            for r in conn.execute("SELECT id, webhook_secret FROM accounts WHERE webhook_secret NOT LIKE 'v1:%'").fetchall():
+                conn.execute("UPDATE accounts SET webhook_secret = ? WHERE id = ?",
+                             (seal(r["webhook_secret"], "webhook_secret"), r["id"]))
 
 
 def now():

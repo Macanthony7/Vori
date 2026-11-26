@@ -10,16 +10,38 @@
 
 | Data | Sensitivity | Protection |
 |---|---|---|
-| Account xpubs | **Privacy-sensitive, can't spend.** They reveal every address and the full history of that wallet account. | Stored as-is (needed to derive addresses). Users are told to use a dedicated account or wallet. Encrypting at rest is a known gap. |
+| Account xpubs | **Privacy-sensitive, can't spend.** They reveal every address and the full history of that wallet account. | Encrypted at rest ([Database](#database)); decrypted in memory only to derive addresses. Users are told to use a dedicated account or wallet. |
 | API key | Credential | Only `sha256(key)` is stored. Keys are 256-bit random (`secrets.token_urlsafe(32)`), so a fast hash is enough. Replaceable from the wallet (`POST /accounts/me/api-key`). |
 | Wallet sessions | Credential, 12 h | Only `sha256(token)` is stored. Created only by a valid signature from the account's BTC main key; deleted on Lock. |
-| Webhook secret | Lets someone forge webhooks to that merchant | Stored in plaintext, because the server needs it to sign. Rotated by calling `PUT /accounts/me/webhook` again. |
+| Webhook secret | Lets someone forge webhooks to that merchant | Encrypted at rest ([Database](#database)); the server decrypts it to sign. Rotated by calling `PUT /accounts/me/webhook` again. |
 | Payments | Business data: amounts, addresses, merchant references | Only visible to the owning API key (`404` for others). |
 | Provider keys (`backend/.env`) | Billing / rate limits, **not funds** | Read-only use. Redacted from logs (`chain_client._redact`). Never commit `.env`. |
 | Plan, timestamps | Low | — |
 
 There's no master seed, no `SEED_PHRASE`, no hot wallet and no signing code anywhere in the gateway.
 Payments land directly in the merchant's wallet.
+
+## Database
+
+xpubs and webhook secrets are encrypted in `gateway.db` with **AES-256-GCM** (`db.seal` / `db.unseal`,
+Python `cryptography`). The key is `GATEWAY_DB_KEY` (32 random bytes, hex) in the environment or
+`backend/.env`, never in the database. Two subkeys are derived from it with HMAC-SHA256: one encrypts,
+one makes `xpub_tag`, a keyed hash used to find an account by xpub at login and to refuse a duplicate
+sign-up without storing the xpub in clear. Each value is bound to its column (AES-GCM additional data),
+so a sealed xpub can't be passed off as a webhook secret. Values start with `v1:`; plaintext rows from
+older databases are encrypted by `db.init()` on the next start.
+
+What this protects: a copy of `gateway.db` alone (a leaked backup, a stolen disk image) no longer
+reveals merchants' whole wallets or lets anyone forge webhooks. What it doesn't: payment addresses,
+amounts and timestamps are still in clear (they're public on chain anyway, but a leak links them to an
+account), and anyone who has both the database and the key (a full server compromise) can read
+everything.
+
+**Keep the key apart from the database backups, and back it up.** Without it the stored xpubs can't
+be read: merchants couldn't log in or get new payment addresses until they sign up again. Funds are
+never at risk either way: the gateway can't spend. If `GATEWAY_DB_KEY` is missing on first start, the
+server generates one and appends it to `backend/.env` (start one process first, so the API and the
+watcher don't each generate a different key). Rotating the key isn't built yet.
 
 ## Seed phrase isolation
 
@@ -75,7 +97,7 @@ sequenceDiagram
 | WebCrypto PBKDF2-SHA256, **600,000** iterations (OWASP 2023), random 16-byte salt, AES-256-GCM with a random 12-byte IV | No extra library. GCM rejects a wrong password and any modified vault. |
 | Vault format v2 `{v: 2, kdf, iterations, salt, iv, data}`, modeled on Gem Wallet's keystore v4: every metadata field is authenticated as AES-GCM additional data; exactly these fields, a 16-byte salt, a 12-byte IV, data at most 4 KB, 100,000 to 10,000,000 iterations | Changing any field (say, lowering the iterations) fails exactly like a wrong password. A planted vault can't downgrade the key derivation or hang the page. v1 vaults (no authenticated metadata) still unlock and are re-encrypted as v2 on the spot. |
 | The frame only accepts a vault from `window.parent` with our own origin | Another page or window can't feed it one. |
-| Unlocked keys live only in the frame's memory | Locking (button, auto-lock after 15 min, or closing the page) drops them. "Lock now" reloads the frame, which clears everything. |
+| Unlocked keys live only in the frame's memory | Locking (button, auto-lock after 15 min, or closing the page) drops them. Locking reloads the frame from a new URL (`derive.html?load=N#unlock`), which clears everything. Re-setting the same URL would only change the fragment and *not* reload, which is how keys once stayed in memory after Lock (fixed; guarded by an E2E test). |
 | Password at least 8 characters | The password can't be reset; restoring needs the recovery phrase. |
 | One wallet per browser profile | Creating or importing another one replaces it; the signup page warns when a wallet is already saved. |
 | Importing a phrase whose xpubs are already registered (a second device) still saves the vault | Same wallet, new device. The page says "Wallet restored on this device". |
@@ -194,7 +216,7 @@ the frame.
 
 | Gap | Plan |
 |---|---|
-| No rate limiting on `POST /accounts`, `POST /payments`, `/auth/*` or `/wallet/balances` | Add per-IP / per-key limits before a public launch (reverse proxy or middleware). Unlimited payment creation also burns provider quota. |
+| Rate limits are in memory, per process ([api.md](api.md#rate-limits)) | Fine for one server. Several processes or servers: limit at the reverse proxy or in Redis. An attacker with many IPs can still sign up many accounts (5/hour each); add a CAPTCHA-free proof of work or invite codes if that happens. |
 | Webhook DNS rebinding: a host could resolve to a public IP at the check and a private one at connect | Connect to the already-checked IP (pinning), or send webhooks through an egress proxy that blocks private ranges. |
 | Coins sent to an expired payment more than 24 h late aren't noticed automatically | They're safe in the merchant's wallet. "Check all payment addresses" (`POST /wallet/scan`) finds them on demand. |
 | On EVM/Tron, late funds arriving after the merchant already sent an expired payment's earlier coins on are missed until they exceed the old amount | Rare: an underpaid payment whose coins were sent on, then paid again. The coins are safe on the address. Fix by reading transaction lists instead of balances (roadmap: transaction hashes). |

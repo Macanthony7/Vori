@@ -57,5 +57,10 @@ def demo():
     print("xpubs self-check OK")
 
 
+def test_selfcheck():
+    """pytest entry point; `python test_xpubs.py` still works."""
+    demo()
+
+
 if __name__ == "__main__":
     demo()

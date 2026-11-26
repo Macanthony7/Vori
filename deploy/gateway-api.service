@@ -1,0 +1,22 @@
+# /etc/systemd/system/gateway-api.service. Guide: docs/deploy.md
+[Unit]
+Description=Payment gateway API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=gateway
+Group=gateway
+WorkingDirectory=/opt/gateway/app/backend
+# One worker: rate limits and SQLite assume a single process.
+ExecStart=/opt/gateway/venv/bin/uvicorn app:app --host 127.0.0.1 --port 8000 --workers 1
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/gateway/app/backend
+
+[Install]
+WantedBy=multi-user.target

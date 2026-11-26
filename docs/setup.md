@@ -57,6 +57,8 @@ fill it in. Never commit `.env`.
 | `GATEWAY_TESTNETS` | all | `1` = add the Sepolia test network to payments, balances and sending. **Development only:** test coins have no value. |
 | `GATEWAY_PUBLIC_URL` | API | Public base URL, used to build `checkout_url` (default `http://localhost:8000`). Set it in production. |
 | `GATEWAY_DB` | all | SQLite path (default `backend/gateway.db`) |
+| `GATEWAY_DB_KEY` | API, watcher | 64 hex characters. Encrypts xpubs and webhook secrets in the database ([security.md](security.md#database)). Generated into `backend/.env` on first start if missing. In production set it yourself (`python -c "import secrets; print(secrets.token_hex(32))"`) and **back it up apart from `gateway.db`**: without it the stored xpubs can't be read. |
+| `GATEWAY_TRUST_PROXY` | API | `1` = read the visitor's IP for [rate limits](api.md#rate-limits) from the last `X-Forwarded-For` entry. Set it only behind a reverse proxy you run that sets that header (nginx: `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`), and don't expose the app port directly: otherwise visitors could choose their own IP. |
 | `GATEWAY_ALLOW_PRIVATE_WEBHOOKS` | webhooks | `1` = allow `http://` and private/loopback webhook URLs. **Development only.** |
 
 The EVM endpoints must answer `eth_getBalance`/`eth_call` for recent past blocks (the last 15).
@@ -94,15 +96,13 @@ payment addresses automatically. The confirm screen says how many top-ups are se
 
 ## Tests
 
-From `backend/`:
+Everything, from the repository root (details, layers and the process: [testing.md](testing.md)):
 
 ```powershell
-python test_xpubs.py
-python test_payments.py
+python run_tests.py
 ```
 
-- `test_xpubs.py`: all 5 xpub families against reference addresses from Ian Coleman's BIP39 test suite. Also covers `Ltub`/`xpub` equivalence, and rejection of private keys, `zpub`, wrong depth, bad checksums and junk.
-- `test_payments.py`: uses a throwaway database, a fake blockchain and a real local webhook receiver. It covers amount parsing, webhook URL rules and signatures, every API error, all status transitions (paid, underpaid, never confirmed, provider down), webhook retries, and the address-reuse rules.
+The old self-checks still run on their own from `backend/`: `python test_xpubs.py`, `python test_payments.py`.
 
 **Live provider check** (read-only, public addresses). This was run against public no-key
 endpoints on 2026-11-22, and all 9 chain/asset pairs parsed correctly:
@@ -167,12 +167,14 @@ against that commit to review them.
 
 ## Deployment checklist
 
+Step-by-step for one VPS, with these config files ready: [deploy.md](deploy.md).
+
 - [ ] Serve over **HTTPS only**. `crypto.getRandomValues` and the clipboard need a secure context, and the security model assumes the HTML isn't tampered with in transit.
 - [ ] Run the API behind a reverse proxy (nginx or Caddy), from `backend/`: `uvicorn app:app --host 127.0.0.1 --port 8000 --workers 1`. Use a single worker while on SQLite. Deploy `frontend/` next to `backend/`, because the API serves `../frontend/public`.
 - [ ] Run the watcher as a service (`python watcher.py`), or from cron every minute with `--max-seconds 280` on hosts that kill long jobs (cPanel). The lock keeps it to one instance.
 - [ ] Fill in `backend/.env` with paid provider keys (see [Providers](#providers)) and set `GATEWAY_PUBLIC_URL` to the HTTPS address customers will open.
 - [ ] If the proxy serves `frontend/public/` itself, copy the security headers from `backend/app.py` (`frame-ancestors 'self'`, `nosniff`, `no-referrer`).
 - [ ] Never set `GATEWAY_ALLOW_PRIVATE_WEBHOOKS` in production.
-- [ ] Add rate limiting on `POST /accounts`, `POST /payments` and `GET /pay/{id}/status`.
-- [ ] Back up `backend/gateway.db`. It holds xpubs, API key hashes, webhook secrets and payment history.
+- [ ] Behind a reverse proxy, set `GATEWAY_TRUST_PROXY=1` (otherwise every visitor shares the proxy's rate limits). Run one API process: rate-limit counts are per process.
+- [ ] Back up `backend/gateway.db` (encrypted xpubs and webhook secrets, API key hashes, payment history) **and, separately, `GATEWAY_DB_KEY`**. One without the other is useless, which is the point.
 - [ ] On shared cPanel hosting, the watcher works from cron (`* * * * * cd /path/backend && python watcher.py --max-seconds 280`). The API is the harder part: cPanel's "Setup Python App" runs WSGI, and FastAPI is ASGI, so it needs the `a2wsgi` adapter. A small VPS is simpler.

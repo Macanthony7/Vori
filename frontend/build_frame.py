@@ -6,10 +6,12 @@ and a modified script would refuse to run. Run from frontend/ after changing any
 or public/styles.css:
 
     python build_frame.py
+    python build_frame.py --check   # fail if public/derive.html is out of date (run by run_tests.py)
 """
 import base64
 import hashlib
 import json
+import sys
 from pathlib import Path
 
 HERE = Path(__file__).parent
@@ -23,7 +25,7 @@ def csp_hash(text):
     return "'sha256-" + base64.b64encode(hashlib.sha256(text.encode("utf-8")).digest()).decode() + "'"
 
 
-def build():
+def build(check=False):
     script = "\n;\n".join((FRAME / name).read_text(encoding="utf-8") for name in SCRIPTS)
     # Pin the lazily loaded signing engine: derive.js refuses any file whose SHA-256 differs.
     sums = {}
@@ -44,6 +46,11 @@ def build():
                 .replace("{{SCRIPT}}", script))
 
     out = HERE / "public" / "derive.html"
+    if check:
+        if out.read_bytes() != html.encode("utf-8"):
+            sys.exit("public/derive.html is out of date: run `python build_frame.py` in frontend/")
+        print("derive.html is up to date")
+        return
     out.write_text(html, encoding="utf-8", newline="\n")
     digest = hashlib.sha256(out.read_bytes()).hexdigest()
     # newline="\n": a CRLF here breaks `sha256sum -c` (see ../.gitattributes)
@@ -52,4 +59,4 @@ def build():
 
 
 if __name__ == "__main__":
-    build()
+    build(check="--check" in sys.argv)

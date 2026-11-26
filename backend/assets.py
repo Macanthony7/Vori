@@ -40,6 +40,17 @@ if TESTNETS:
 EVM_CHAINS = {"ETH": dict(chain_id=1, native="ETH"), "BSC": dict(chain_id=56, native="BNB"),
               "SEPOLIA": dict(chain_id=11155111, native="ETH")}
 TRON_CHAINS = ("TRX", "NILE")  # native asset TRX on both
+# Block explorers: (transaction URL prefix, address URL prefix).
+EXPLORERS = {
+    "BTC": ("https://blockchair.com/bitcoin/transaction/", "https://blockchair.com/bitcoin/address/"),
+    "LTC": ("https://blockchair.com/litecoin/transaction/", "https://blockchair.com/litecoin/address/"),
+    "DOGE": ("https://blockchair.com/dogecoin/transaction/", "https://blockchair.com/dogecoin/address/"),
+    "ETH": ("https://etherscan.io/tx/", "https://etherscan.io/address/"),
+    "BSC": ("https://bscscan.com/tx/", "https://bscscan.com/address/"),
+    "SEPOLIA": ("https://sepolia.etherscan.io/tx/", "https://sepolia.etherscan.io/address/"),
+    "TRX": ("https://tronscan.org/#/transaction/", "https://tronscan.org/#/address/"),
+    "NILE": ("https://nile.tronscan.org/#/transaction/", "https://nile.tronscan.org/#/address/"),
+}
 
 MAX_UNITS = 10**15  # cap per payment, in whole coins/tokens
 

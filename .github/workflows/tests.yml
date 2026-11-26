@@ -1,0 +1,36 @@
+# Runs every check on each push and pull request: python run_tests.py (docs/testing.md).
+# No secrets needed: the tests use a fake blockchain and a temporary database.
+name: tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install
+        run: |
+          pip install -r backend/requirements.txt -r requirements-dev.txt
+          python -m playwright install --with-deps chromium
+      - name: Test
+        run: python run_tests.py
+      - name: Coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-html
+          path: htmlcov/
+          if-no-files-found: ignore

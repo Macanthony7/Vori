@@ -90,7 +90,7 @@ def deliver_due(conn, now, send=send, limit=50):
     ).fetchall()
     delivered = 0
     for e in due:
-        error = "webhook removed" if not e["webhook_url"] else send(e["webhook_url"], e["webhook_secret"], e["body"])
+        error = "webhook removed" if not e["webhook_url"] else send(e["webhook_url"], db.unseal(e["webhook_secret"], "webhook_secret"), e["body"])
         attempts = e["attempts"] + 1
         if error is None:
             delivered += 1

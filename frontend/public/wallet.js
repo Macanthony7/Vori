@@ -55,6 +55,7 @@
     var frame = $id("frame");
     var timer = null;
     var session = null; // "gws_..." token, memory only: lock or reload = sign in again
+    var frameLoads = 0;
 
     if (!saved || !saved.vault) {
         $id("none").hidden = false;
@@ -91,7 +92,9 @@
             frame.src = "about:blank";
             showError("Your browser blocked the secure wallet window, so it can't run here. Open this page in Chrome, Edge, Firefox or Safari.");
         }, FRAME_TIMEOUT_MS);
-        frame.src = "derive.html#unlock";
+        // A new URL every time: re-setting the same "derive.html#unlock" is only a fragment change, which
+        // does NOT reload the frame, so the unlocked keys would stay in its memory.
+        frame.src = "derive.html?load=" + (++frameLoads) + "#unlock";
     }
 
     async function signIn() {
@@ -237,7 +240,16 @@
             var name = label(p.chain, p.asset);
             var state = STATUS[p.status] || p.status;
             if (p.status === "expired" && p.amount_received !== "0") state += ", " + p.amount_received + " received";
-            tr.append(created, el("td", "num", p.amount + " " + name[0] + " on " + name[1]), el("td", "", state));
+            var cell = el("td", "", state);
+            if (p.amount_received !== "0") {
+                var tx = el("a", "", "View");
+                tx.href = p.transactions.length === 1 ? p.transactions[0].url : p.address_url;
+                tx.target = "_blank";
+                tx.rel = "noopener noreferrer";
+                tx.setAttribute("aria-label", "View on the block explorer");
+                cell.append(" · ", tx);
+            }
+            tr.append(created, el("td", "num", p.amount + " " + name[0] + " on " + name[1]), cell);
             body.appendChild(tr);
         });
         $id("payments").hidden = !data.payments.length;

@@ -22,3 +22,7 @@ __pycache__/
 .claude/
 .vscode/
 .idea/
+*.bak
+.coverage
+.coverage.*
+htmlcov/

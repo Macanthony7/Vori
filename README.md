@@ -13,6 +13,7 @@ frontend/     onboarding pages + the sandboxed seed frame (served by the backend
 backend/      API (FastAPI), payment watcher, database, tests
 xpub_tool/    standalone offline xpub tool (modified copy of Ian Coleman's BIP39 tool)
 docs/         documentation
+deploy/       Caddyfile and systemd units for a VPS (docs/deploy.md)
 ```
 
 ```
@@ -45,14 +46,17 @@ backend/
 | Payments: `POST /payments`, `GET /payments[/{id}]`, 30-min window, address reuse for the gap limit | Built and tested |
 | Watcher: detection with standard confirmations, native coins + USDT; cron mode with a single-instance lock | Built; logic tested with a fake chain, providers checked live (read-only) |
 | Signed webhooks with retries | Built and tested |
-| Wallet vault: password-encrypted phrase on the device, unlock / auto-lock (`wallet.html`) | Built; logic tested, verified in Chrome |
+| Wallet vault: password-encrypted phrase on the device, unlock / auto-lock (`wallet.html`) | Built; E2E tested (Lock bug fixed) |
+| Test environment: `run_tests.py`, E2E (Playwright), 94% backend coverage, CI | Built |
 | Checkout page `/pay/{id}` with QR, countdown and live status | Built; API tested, page checked in the preview browser (desktop + mobile) |
 | Wallet dashboard: live balances, Receive, recent payments, sign-in by signature, API key recovery | Built and tested; checked in the preview browser (signatures from the real frame code verified by the server) |
 | Send BTC / LTC / DOGE, signed in the offline frame (Trust Wallet Core) | Built and tested; signatures verified independently; not yet tried with real funds or inside Chrome's sandboxed frame |
 | Send native ETH / BNB, plus the Sepolia test network (`GATEWAY_TESTNETS=1`) | Built and tested; Sepolia transfer signed in the browser and verified independently; not yet broadcast |
 | Send TRX and USDT (ETH, BSC, Tron) with gas top-ups from the main address, plus Nile and Sepolia USDT test networks | Built; tested end to end on Nile (payments and sends) |
 | No address reuse; paid-late watch (24 h) and "Check all payment addresses" | Built; late payment tested end to end on Nile |
-| Transaction hashes, rate limiting | Planned, see [docs/roadmap.md](docs/roadmap.md) |
+| Transaction hashes and explorer links on payments | Built; lookups checked live on Nile and Sepolia |
+| Rate limiting (per IP and per account, 429 + Retry-After) | Built and tested (self-checks) |
+| xpubs and webhook secrets encrypted in the database (`GATEWAY_DB_KEY`) | Built and tested; existing database migrated, wallet sign-in and new payments checked |
 | Free-tier limits, paid plans | Later |
 
 ## Quick start (development)
@@ -73,7 +77,7 @@ python watcher.py
 
 Open <http://localhost:8000>. API docs: <http://localhost:8000/api/docs>.
 
-Self-checks, run from `backend/`: `python test_xpubs.py` and `python test_payments.py`.
+Tests: `python run_tests.py` from the repository root runs everything: backend tests, E2E browser tests and coverage ([docs/testing.md](docs/testing.md)). What's left before launch: [docs/plan.md](docs/plan.md).
 After editing the seed frame, run `python build_frame.py` from `frontend/`.
 Provider keys and deployment notes are in [docs/setup.md](docs/setup.md).
 
@@ -85,6 +89,9 @@ Provider keys and deployment notes are in [docs/setup.md](docs/setup.md).
 | [docs/architecture.md](docs/architecture.md) | Components, onboarding and payment flows, watcher, data model, file map |
 | [docs/api.md](docs/api.md) | HTTP API reference, payment statuses, webhooks and signature verification |
 | [docs/security.md](docs/security.md) | Threat model, seed isolation, payment integrity, webhook SSRF rules, known gaps |
-| [docs/setup.md](docs/setup.md) | Development, providers, tests, building the seed frame, deployment |
+| [docs/setup.md](docs/setup.md) | Development, providers, tests, building the seed frame, production checklist |
+| [docs/testing.md](docs/testing.md) | Test layers, `run_tests.py`, E2E, coverage, the process for every change |
+| [docs/plan.md](docs/plan.md) | The build plan to launch, with "done" criteria and tests per item |
+| [docs/deploy.md](docs/deploy.md) | Step-by-step VPS deploy (Caddy HTTPS, systemd, backups) and the mainnet test |
 | [docs/roadmap.md](docs/roadmap.md) | What's next, plus what was kept from the original custodial prototype |
 | [CHANGELOG.md](CHANGELOG.md) | What changed, by version |

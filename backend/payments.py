@@ -7,8 +7,9 @@ import os
 import secrets
 from datetime import datetime, timedelta, timezone
 
+import chain_client
 import db
-from assets import from_units, lookup, to_units
+from assets import EXPLORERS, from_units, lookup, to_units
 from xpubs import address
 
 WINDOW = timedelta(minutes=30)        # time the customer has to send the payment
@@ -23,7 +24,8 @@ EVENTS = {"confirming": "payment.confirming", "confirmed": "payment.confirmed", 
 PUBLIC_URL = os.getenv("GATEWAY_PUBLIC_URL", "http://localhost:8000").rstrip("/")  # base of checkout links
 # What the payer's checkout page may see. Not `reference` (the merchant's own order data).
 CHECKOUT_FIELDS = ("id", "status", "chain", "asset", "address", "amount", "amount_received", "amount_confirmed",
-                   "confirmations_required", "token_contract", "created_at", "expires_at", "confirmed_at")
+                   "confirmations_required", "token_contract", "created_at", "expires_at", "confirmed_at",
+                   "address_url")  # no transaction hashes on the payer's page (merchant's choice)
 
 
 class PaymentError(ValueError):
@@ -54,7 +56,7 @@ def create(conn, account_id, chain, asset, amount, reference=None, now=None):
         # Every payment gets a never-used address. The gateway's wallet tracks every one of them, so
         # the gap limit of other wallets doesn't matter here (docs/architecture.md#address-allocation).
         index = row["next_index"]
-        addr = address(spec["xpub"], row["xpub"], index)
+        addr = address(spec["xpub"], db.unseal(row["xpub"], "xpub"), index)
         conn.execute(
             "UPDATE account_xpubs SET next_index = next_index + 1 WHERE account_id = ? AND chain = ?",
             (account_id, spec["xpub"]),
@@ -92,9 +94,22 @@ def next_status(p, seen, confirmed, now):
     return "pending"
 
 
-def apply_observation(conn, p, seen, confirmed, now):
-    """Store what the chain showed; queue a webhook if the status changed, or `payment.paid_late` if
-    more confirmed funds arrived on an expired payment. Returns the new status."""
+def find_hashes(p, seen, lookup=None):
+    """New transaction hashes when the amount went up, else None. Best effort: a failed lookup only
+    means a missing explorer link (the address link still works), never a wrong status."""
+    if seen <= int(p["received"]):
+        return None
+    lookup = lookup or chain_client.tx_hashes
+    try:
+        # Anything new arrived after the last observation (updated_at); EVM tokens search from there.
+        return lookup(p["chain"], p["asset"], p["address"], _ts(p["updated_at"]))
+    except chain_client.ChainError:
+        return None
+
+
+def apply_observation(conn, p, seen, confirmed, now, hashes=None):
+    """Store what the chain showed (and new transaction hashes); queue a webhook if the status changed,
+    or `payment.paid_late` if more confirmed funds arrived on an expired payment. Returns the new status."""
     if p["status"] == "expired":
         # EVM/Tron observe a balance, which drops when the merchant sends the coins on. Keep the
         # high-water mark so an expired payment never "loses" what it received.
@@ -104,12 +119,14 @@ def apply_observation(conn, p, seen, confirmed, now):
     stamp = db.at(now)
     pace = LATE_CHECK if status == "expired" else timedelta(seconds=CHECK_EVERY[p["chain"]])
     next_check = db.at(now + pace)
+    known = json.loads(p["tx_hashes"])
+    tx_hashes = json.dumps(list(dict.fromkeys(known + (hashes or []))))
     with conn:
         updated = conn.execute(
             """UPDATE payments SET received = ?, received_confirmed = ?, status = ?, updated_at = ?,
-                      next_check_at = ?, confirmed_at = CASE WHEN ? = 'confirmed' THEN ? ELSE confirmed_at END
+                      next_check_at = ?, tx_hashes = ?, confirmed_at = CASE WHEN ? = 'confirmed' THEN ? ELSE confirmed_at END
                WHERE id = ? AND status = ? AND received_confirmed = ?""",  # never overwrite a concurrent change
-            (str(seen), str(confirmed), status, stamp, next_check, status, stamp, p["id"], p["status"],
+            (str(seen), str(confirmed), status, stamp, next_check, tx_hashes, status, stamp, p["id"], p["status"],
              p["received_confirmed"]),
         ).rowcount
         # Only the writer that actually made the change queues the event: no duplicate webhooks.
@@ -136,6 +153,7 @@ def public(p):
     """API representation of a payment row (amounts as decimal strings)."""
     _, spec = lookup(p["chain"], p["asset"])
     d = spec["decimals"]
+    tx_url, address_url = EXPLORERS[p["chain"]]
     return {
         "id": p["id"],
         "status": p["status"],
@@ -151,6 +169,10 @@ def public(p):
         "created_at": p["created_at"],
         "expires_at": p["expires_at"],
         "confirmed_at": p["confirmed_at"],
+        # Incoming transactions, oldest first. Empty for native ETH/BNB (not searchable with plain
+        # JSON-RPC) and until found; address_url then shows them on the explorer.
+        "transactions": [{"hash": h, "url": tx_url + h} for h in json.loads(p["tx_hashes"])],
+        "address_url": address_url + p["address"],
         "checkout_url": f"{PUBLIC_URL}/pay/{p['id']}",
     }
 

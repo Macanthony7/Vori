@@ -8,6 +8,7 @@ Payment addresses are never reused, so "balance" and "received" are the same thi
 and Tron until the merchant sends the coins on. Configuration: docs/setup.md#providers
 """
 import os
+from datetime import datetime, timezone
 
 import requests
 from bip_utils import Base58Decoder
@@ -124,6 +125,59 @@ def _post(url, payload, **kwargs):
 def _redact(url):
     # RPC URLs often embed the API key in the path; never put it in logs.
     return url.split("//")[-1].split("/")[0]
+
+
+# --- Which transactions paid an address (receipts and explorer links only; amounts come from observe) ---
+TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"  # ERC-20 Transfer
+BLOCK_SECONDS = {"ETH": 12, "SEPOLIA": 12, "BSC": 0.75}  # lower bounds, so the block window errs large
+LOG_CHUNK = 500       # blocks per eth_getLogs; the smallest range limit common among free RPC plans
+MAX_LOG_CHUNKS = 20   # ponytail: stop after 10,000 blocks; payments then fall back to the address link
+
+
+def tx_hashes(chain, asset, address, since):
+    """Hashes of incoming transfers of this asset to `address`, oldest first. `since` (datetime): no
+    transfer is older than this (only EVM tokens need it). None when it can't be looked up: native
+    ETH/BNB, which plain JSON-RPC can't search by address."""
+    contract = ASSETS[(chain, asset)]["contract"]
+    if chain in ("BTC", "LTC", "DOGE"):
+        params = {"limit": 200, **({"token": BLOCKCYPHER_TOKEN} if BLOCKCYPHER_TOKEN else {})}
+        data = _get(f"https://api.blockcypher.com/v1/{chain.lower()}/main/addrs/{address}", params=params)
+        refs = (data.get("txrefs") or []) + (data.get("unconfirmed_txrefs") or [])
+        hashes = [t["tx_hash"] for t in refs if t.get("tx_input_n") == -1]
+        return list(dict.fromkeys(reversed(hashes)))  # newest first from BlockCypher; dedupe
+    if chain in TRON_URLS:
+        url = TRON_URLS[chain]
+        path = "transactions/trc20" if contract else "transactions"
+        params = {"only_to": "true", "limit": 50, **({"contract_address": contract} if contract else {})}
+        data = _get(f"{url}/v1/accounts/{address}/{path}", params=params, headers=_tron_headers(url))
+        if not data.get("success", True):
+            raise ChainError(f"TronGrid {path}: {str(data)[:200]}")
+        rows = data.get("data") or []
+        if contract:
+            hashes = [t["transaction_id"] for t in rows
+                      if t.get("to") == address and (t.get("token_info") or {}).get("address") == contract]
+        else:
+            hashes = [t["txID"] for t in rows
+                      if (t.get("ret") or [{}])[0].get("contractRet") == "SUCCESS"
+                      and t["raw_data"]["contract"][0]["type"] == "TransferContract"]
+        return list(dict.fromkeys(reversed(hashes)))
+    if not contract:
+        return None
+    url = RPC_URLS[chain]
+    latest = int(_rpc(url, "eth_blockNumber", []), 16)
+    age = (datetime.now(timezone.utc) - since).total_seconds()
+    first = max(0, latest - int(age / BLOCK_SECONDS[chain]) - 50)
+    topics = [TRANSFER_TOPIC, None, "0x" + address[2:].lower().rjust(64, "0")]
+    hashes, top = [], latest
+    for _ in range(MAX_LOG_CHUNKS):
+        if top < first:
+            break
+        bottom = max(first, top - LOG_CHUNK + 1)
+        logs = _rpc(url, "eth_getLogs", [{"address": contract, "topics": topics,
+                                          "fromBlock": hex(bottom), "toBlock": hex(top)}])
+        hashes = [log["transactionHash"] for log in logs] + hashes
+        top = bottom - 1
+    return list(dict.fromkeys(hashes))
 
 
 # --- BTC / LTC / DOGE via BlockCypher ---------------------------------------------------------------

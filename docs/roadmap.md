@@ -28,12 +28,12 @@ Focus: **the engine first**. Revenue features wait until it's solid.
 | 3 | **Wallet dashboard: Balance + Receive** | The merchant needs to see the money in one place | **Done:** see [api.md](api.md#wallet). Live balance per coin over the main address plus every payment address that ever received funds (no gap limit). Receive = the main address (index 0); payments start at index 1. Recent payments. Balances cached 60 s. |
 | 4 | **Dashboard login without the API key** | The API key shouldn't need to live in the browser | **Done:** the unlocked vault signs a single-use challenge with the BTC main key; the server verifies it against the stored xpub and issues a 12 h session. Also gives **API key recovery** (`POST /accounts/me/api-key`). |
 | 5 | **Send, signed on the merchant's device** | Moving funds without custody | **Done for every asset: BTC/LTC/DOGE, native ETH/BNB/TRX, and USDT on Ethereum, BSC and Tron** with gas top-ups from the main address (Sepolia and Nile test networks for trying it; Sepolia ETH, Nile TRX and USDT tested end to end, not yet tried with real funds): see [security.md](security.md#sending). Steps modeled on Gem Wallet (prepare → plan → confirm in the frame → sign → relay); signing engine Trust Wallet Core. See [Sending and gas](#sending-and-gas). **Required before launch for ETH, BSC and Tron:** other wallets don't show our payment addresses there. |
-| 6 | **Transaction hash on payments** | Receipts, explorer links on the checkout page, support | See [Transaction hashes](#transaction-hashes-how-the-prototype-found-them). |
+| 6 | **Transaction hash on payments** | Receipts, explorer links on the checkout page, support | **Done:** `transactions` and `address_url` on payments, Recent payments and webhooks; the checkout page gets the address link only (decided). Native ETH/BNB get the address link only (no new provider, decided). Amounts still come from balances. See [Transaction hashes](#transaction-hashes-how-the-prototype-found-them). |
 | 7 | **"Paid late" detection** | Funds arriving after `expired` were invisible | **Done:** the watcher keeps checking expired payments for 24 h (every 15 min) and sends `payment.paid_late`; after that, "Check all payment addresses" on the wallet page (`POST /wallet/scan`). See [api.md](api.md#payment-statuses). |
 | 8 | **Stop reusing addresses** | Payers never see a repeated address | **Done:** every payment gets a new address. No opt-in (decided): merchants who use another wallet raise its gap limit ([api.md](api.md#address-assignment)). Add a per-account setting if someone needs it. |
-| 9 | Rate limiting | Abuse, provider quota | `POST /accounts` per IP, `POST /payments` per key, `GET /pay/{id}/status` per IP. |
+| 9 | Rate limiting | Abuse, provider quota | **Done:** in-memory sliding windows per IP (sign-up, login, checkout) and per account (payments, wallet). See [api.md](api.md#rate-limits). |
 | 10 | BlockCypher push hooks | Save BTC/LTC/DOGE quota | See [BlockCypher push hooks](#blockcypher-push-hooks). |
-| 11 | Encrypt xpubs at rest | DB-only leaks | Server-held key. |
+| 11 | Encrypt xpubs at rest | DB-only leaks | **Done:** xpubs and webhook secrets, AES-256-GCM with `GATEWAY_DB_KEY`. See [security.md](security.md#database). Later: key rotation. |
 
 ### Reference: Gem Wallet
 
@@ -94,8 +94,10 @@ shows it.
 ## Transaction hashes (how the prototype found them)
 
 The gateway measures **amounts** (balances at a confirmed block), which is enough to decide
-whether a payment is paid. It doesn't record **which transaction** paid it yet. The prototype did,
-per chain:
+whether a payment is paid. It also records **which transactions** paid it (`chain_client.tx_hashes`,
+only when the amount goes up). The prototype's methods per chain, and what the gateway uses now:
+BlockCypher `txrefs`, `eth_getLogs` in 500-block chunks from the last observation (at most 10,000
+blocks), TronGrid `/v1/accounts`. Native ETH/BNB: none (address link instead).
 
 | Chain | Method | Notes |
 |---|---|---|

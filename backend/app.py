@@ -5,9 +5,12 @@ Payments are watched by a separate process: python watcher.py
 Docs: ../docs/api.md
 """
 import hashlib
+import os
 import secrets
 import sqlite3
+import threading
 import time
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
@@ -58,6 +61,51 @@ def fail(status, message):
     raise HTTPException(status, {"error": message})
 
 
+# --- Rate limits ------------------------------------------------------------------------------------
+# Sliding window per (bucket, key). Docs: docs/api.md#rate-limits
+# ponytail: in memory, one server process. Several processes or servers: limit at the reverse proxy
+# (nginx limit_req) or move this to Redis.
+LIMITS = {                       # bucket: (requests, per seconds)
+    "signup": (5, 3600),         # POST /accounts, per IP
+    "auth": (20, 60),            # POST /auth/challenge and /auth/login, per IP
+    "payments": (60, 60),        # POST /payments, per account
+    "checkout": (120, 60),       # GET /pay/{id}/status, per IP (the page polls every 5 s)
+    "wallet": (30, 60),          # balances and send prepare/relay, per account
+    "wallet_tx": (60, 60),       # GET /wallet/tx: the page polls every 3 s while top-ups land
+    "scan": (1, 60),             # POST /wallet/scan, per account
+}
+# Behind a reverse proxy every request comes from the proxy's IP. Set GATEWAY_TRUST_PROXY=1 only when
+# a proxy you run sets X-Forwarded-For; otherwise visitors could pick their own "IP".
+TRUST_PROXY = os.getenv("GATEWAY_TRUST_PROXY") == "1"
+_hits = {}
+_hits_lock = threading.Lock()
+
+
+def client_ip(request):
+    if TRUST_PROXY:
+        forwarded = request.headers.get("x-forwarded-for", "")
+        if forwarded:
+            return forwarded.split(",")[-1].strip()  # the entry our proxy added (earlier ones are the client's claim)
+    return request.client.host if request.client else "unknown"
+
+
+def rate_limit(bucket, key):
+    count, per = LIMITS[bucket]
+    now = time.monotonic()
+    with _hits_lock:
+        if len(_hits) > 50_000:  # forget idle keys so memory stays bounded
+            for k in [k for k, q in _hits.items() if not q or q[-1] <= now - 3600]:
+                del _hits[k]
+        q = _hits.setdefault((bucket, key), deque())
+        while q and q[0] <= now - per:
+            q.popleft()
+        if len(q) >= count:
+            retry = int(q[0] + per - now) + 1
+            raise HTTPException(429, {"error": f"too many requests; try again in {retry} s"},
+                                headers={"Retry-After": str(retry)})
+        q.append(now)
+
+
 # --- Accounts -------------------------------------------------------------------------------------
 
 class NewAccount(BaseModel):
@@ -72,7 +120,8 @@ def first_addresses(xpubs):
 
 
 @app.post("/accounts", status_code=201)
-def create_account(body: NewAccount):
+def create_account(body: NewAccount, request: Request):
+    rate_limit("signup", client_ip(request))
     normalized, errors = {}, {}
     for chain, key in body.xpubs.items():
         chain = chain.upper()
@@ -91,8 +140,8 @@ def create_account(body: NewAccount):
                 "INSERT INTO accounts (api_key_hash, created_at) VALUES (?, ?)", (hash_key(api_key), created)
             ).lastrowid
             conn.executemany(
-                "INSERT INTO account_xpubs (account_id, chain, xpub, next_index) VALUES (?, ?, ?, ?)",
-                [(account_id, chain, x, MAIN_INDEX + 1) for chain, x in normalized.items()],
+                "INSERT INTO account_xpubs (account_id, chain, xpub, xpub_tag, next_index) VALUES (?, ?, ?, ?, ?)",
+                [(account_id, chain, db.seal(x, "xpub"), db.tag(x), MAIN_INDEX + 1) for chain, x in normalized.items()],
             )
     except sqlite3.IntegrityError:
         # Same xpub already registered. Never reveal or return the existing account.
@@ -134,7 +183,7 @@ def me(authorization: str = Header(None)):
         "plan": acct["plan"],
         "plan_expires_at": acct["plan_expires_at"],
         "webhook_url": acct["webhook_url"],
-        "chains": first_addresses({r["chain"]: r["xpub"] for r in rows}),
+        "chains": first_addresses({r["chain"]: db.unseal(r["xpub"], "xpub") for r in rows}),
     }
 
 
@@ -151,7 +200,7 @@ def set_webhook(body: WebhookSettings, authorization: str = Header(None)):
         fail(400, str(e))
     secret = "whsec_" + secrets.token_urlsafe(32)  # new secret on every change
     with closing(db.connect()) as conn, conn:
-        conn.execute("UPDATE accounts SET webhook_url = ?, webhook_secret = ? WHERE id = ?", (url, secret, acct["id"]))
+        conn.execute("UPDATE accounts SET webhook_url = ?, webhook_secret = ? WHERE id = ?", (url, db.seal(secret, "webhook_secret"), acct["id"]))
     return {"url": url, "secret": secret}
 
 
@@ -182,7 +231,8 @@ SESSION_TTL = timedelta(hours=12)
 
 
 @app.post("/auth/challenge")
-def login_challenge():
+def login_challenge(request: Request):
+    rate_limit("auth", client_ip(request))
     challenge = "gw-login:" + secrets.token_urlsafe(24)
     now = datetime.now(timezone.utc)
     with closing(db.connect()) as conn, conn:
@@ -199,7 +249,8 @@ class Login(BaseModel):
 
 
 @app.post("/auth/login")
-def login(body: Login):
+def login(body: Login, request: Request):
+    rate_limit("auth", client_ip(request))
     now = datetime.now(timezone.utc)
     with closing(db.connect()) as conn, conn:
         # Single use: the challenge is gone whether or not the signature checks out.
@@ -213,7 +264,7 @@ def login(body: Login):
     except (XpubError, ValueError):
         fail(401, "invalid login")
     with closing(db.connect()) as conn:
-        row = conn.execute("SELECT account_id FROM account_xpubs WHERE chain = 'BTC' AND xpub = ?", (xpub,)).fetchone()
+        row = conn.execute("SELECT account_id FROM account_xpubs WHERE chain = 'BTC' AND xpub_tag = ?", (db.tag(xpub),)).fetchone()
     if not row:
         fail(401, "no account for this wallet")
     try:
@@ -260,8 +311,9 @@ def cached_balance(job):
 def wallet_balances(authorization: str = Header(None)):
     """Live balance per asset: the main address plus every payment address that ever received funds."""
     acct = account_for(authorization)
+    rate_limit("wallet", acct["id"])
     with closing(db.connect()) as conn:
-        xpubs = {r["chain"]: r["xpub"] for r in conn.execute(
+        xpubs = {r["chain"]: db.unseal(r["xpub"], "xpub") for r in conn.execute(
             "SELECT chain, xpub FROM account_xpubs WHERE account_id = ?", (acct["id"],))}
         funded = conn.execute(
             """SELECT DISTINCT chain, asset, address, address_index FROM payments
@@ -302,6 +354,7 @@ def wallet_scan(authorization: str = Header(None)):
     ponytail: one provider call per address, on demand; batch or page it if accounts get big.
     """
     acct = account_for(authorization)
+    rate_limit("scan", acct["id"])
     with closing(db.connect()) as conn:
         # Latest payment per address (older databases may have reused addresses): SQLite returns the
         # bare columns of the MAX(created_at) row.
@@ -323,7 +376,7 @@ def wallet_scan(authorization: str = Header(None)):
             if seen is None:
                 failed += 1
             elif seen[0] > 0:
-                payments.apply_observation(conn, p, seen[0], seen[1], now)
+                payments.apply_observation(conn, p, seen[0], seen[1], now, payments.find_hashes(p, seen[0]))
                 found += 1
     if found:
         _balance_cache.clear()
@@ -382,6 +435,7 @@ def pool_map(fn, items, workers=8):
 @app.get("/wallet/send/{chain}")
 def send_prepare(chain: str, asset: Optional[str] = None, to: Optional[str] = None, authorization: str = Header(None)):
     acct = account_for(authorization)
+    rate_limit("wallet", acct["id"])
     chain = chain.upper()
     kind, asset, contract = sendable(chain, asset)
     xpub_chain = {"utxo": chain, "evm": "ETH", "tron": "TRX"}[kind]
@@ -390,7 +444,8 @@ def send_prepare(chain: str, asset: Optional[str] = None, to: Optional[str] = No
                            (acct["id"], xpub_chain)).fetchone()
     if not row:
         fail(400, f"no {xpub_chain} xpub is registered on this account")
-    addrs = wallet_addresses(acct["id"], xpub_chain, row["xpub"])
+    xpub = db.unseal(row["xpub"], "xpub")
+    addrs = wallet_addresses(acct["id"], xpub_chain, xpub)
     to = (to or "").strip()
     if (kind == "tron" or contract) and not to:
         fail(400, "`to` is required: fees depend on the destination")
@@ -404,7 +459,7 @@ def send_prepare(chain: str, asset: Optional[str] = None, to: Optional[str] = No
             found = pool_map(lambda a: chain_client.unspent(chain, a), addrs, 3)  # BlockCypher: ~3 requests/s without a token
             utxos = [{"address": a, "index": addrs[a], **u} for a, us in zip(addrs, found) for u in us]
             return {**out, "utxos": utxos, "fee_per_byte": chain_client.fee_rates(chain), "change_index": MAIN_INDEX,
-                    "change_address": address(chain, row["xpub"], MAIN_INDEX)}
+                    "change_address": address(chain, xpub, MAIN_INDEX)}
 
         if kind == "evm":
             out.update(chain_id=EVM_CHAINS[chain]["chain_id"], gas_limit=EVM_GAS_LIMIT, fees=chain_client.evm_fees(chain))
@@ -448,7 +503,7 @@ class Broadcast(BaseModel):
 
 @app.post("/wallet/send/{chain}")
 def send_broadcast(chain: str, body: Broadcast, authorization: str = Header(None)):
-    account_for(authorization)  # ponytail: any signed tx is relayed; signing is what protects funds
+    rate_limit("wallet", account_for(authorization)["id"])  # ponytail: any signed tx is relayed; signing protects funds
     chain = chain.upper()
     kind = sendable(chain)[0]
     txs = [t.strip().removeprefix("0x") for t in body.txs]
@@ -472,7 +527,7 @@ def send_broadcast(chain: str, body: Broadcast, authorization: str = Header(None
 @app.get("/wallet/tx/{chain}/{tx_hash}")
 def tx_status(chain: str, tx_hash: str, authorization: str = Header(None)):
     """Has a relayed transaction landed? Used to wait for gas top-ups before sending tokens."""
-    account_for(authorization)
+    rate_limit("wallet_tx", account_for(authorization)["id"])
     chain = chain.upper()
     if sendable(chain)[0] == "utxo":
         fail(400, "not available for this chain")
@@ -498,6 +553,7 @@ class NewPayment(BaseModel):
 @app.post("/payments", status_code=201)
 def create_payment(body: NewPayment, authorization: str = Header(None)):
     acct = account_for(authorization)
+    rate_limit("payments", acct["id"])
     with closing(db.connect()) as conn:
         try:
             p = payments.create(conn, acct["id"], body.chain, body.asset, body.amount, body.reference)
@@ -531,8 +587,8 @@ def list_payments(status: Optional[str] = None, limit: int = 50, authorization: 
 # --- Checkout (public, for the payer) ---------------------------------------------------------------
 
 @app.get("/pay/{payment_id}/status")
-def checkout_status(payment_id: str):
-    # ponytail: no rate limit yet (roadmap item 7); ids are 128-bit random, so guessing one is hopeless.
+def checkout_status(payment_id: str, request: Request):
+    rate_limit("checkout", client_ip(request))  # ids are 128-bit random; this only stops floods
     with closing(db.connect()) as conn:
         p = conn.execute("SELECT * FROM payments WHERE id = ?", (payment_id,)).fetchone()
     if not p:

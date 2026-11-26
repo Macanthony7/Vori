@@ -76,6 +76,10 @@
             setStatus("Waiting for your payment…");
         }
 
+        // The address on the block explorer lists the payment. No hashes on this page.
+        $("tx-link").firstElementChild.href = p.address_url;
+        show($("tx-link"), received);
+
         // Only offer the address while sending is still useful.
         show($("pay-box"), p.status === "pending" && left > 0);
         if (p.status === "pending" && left > 0) {

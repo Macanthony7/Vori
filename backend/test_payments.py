@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 os.environ["GATEWAY_DB"] = os.path.join(tempfile.mkdtemp(), "test.db")
+os.environ["GATEWAY_DB_KEY"] = os.urandom(32).hex()  # never touch backend/.env from tests
 os.environ["GATEWAY_ALLOW_PRIVATE_WEBHOOKS"] = "1"  # so the local receiver below is allowed
 
 from contextlib import closing  # noqa: E402
@@ -238,7 +239,65 @@ def check_wallet_login():
     assert api.get("/accounts/me", headers=sess).status_code == 401, "logged out"
 
 
+def check_rate_limits(real_limits):
+    """429 with Retry-After past the limit; per IP for sign-up and checkout, per account for payments;
+    X-Forwarded-For only counts with GATEWAY_TRUST_PROXY."""
+    app_module.LIMITS.clear()
+    app_module.LIMITS.update(real_limits)
+    app_module._hits.clear()
+    bad = {"xpubs": {"BTC": "not-an-xpub"}}
+    codes = [api.post("/accounts", json=bad).status_code for _ in range(6)]
+    assert codes == [400] * 5 + [429], codes
+    r = api.post("/accounts", json=bad)
+    assert r.status_code == 429 and int(r.headers["retry-after"]) > 3500 and "too many" in r.text, r.headers
+    # A spoofed X-Forwarded-For changes nothing unless the proxy is trusted.
+    assert api.post("/accounts", json=bad, headers={"X-Forwarded-For": "203.0.113.9"}).status_code == 429
+    app_module.TRUST_PROXY = True
+    try:
+        # The proxy appends the real IP last; whatever the client claimed before it is ignored.
+        h = {"X-Forwarded-For": "1.2.3.4, 203.0.113.9"}
+        assert api.post("/accounts", json=bad, headers=h).status_code == 400, "new IP, own budget"
+        assert app_module.client_ip(type("R", (), {"headers": {"x-forwarded-for": h["X-Forwarded-For"]}, "client": None})()) == "203.0.113.9"
+    finally:
+        app_module.TRUST_PROXY = False
+
+
+def check_sealed(secret):
+    """xpubs and webhook secrets are encrypted in the database; old plaintext rows get migrated."""
+    with closing(db.connect()) as conn:
+        dump = " | ".join(str(tuple(r)) for t in ("accounts", "account_xpubs")
+                          for r in conn.execute(f"SELECT * FROM {t}"))
+        assert CASES["BTC"][0] not in dump and secret not in dump, "plaintext secret in the database"
+        row = conn.execute("SELECT xpub, xpub_tag FROM account_xpubs WHERE chain = 'BTC' LIMIT 1").fetchone()
+        assert row["xpub"].startswith("v1:") and db.unseal(row["xpub"], "xpub") == CASES["BTC"][0]
+        assert row["xpub_tag"] == db.tag(CASES["BTC"][0])
+        try:
+            db.unseal(row["xpub"], "webhook_secret")
+            raise AssertionError("a sealed xpub must not open as another column")
+        except Exception as e:
+            assert not isinstance(e, AssertionError), e
+        # Same xpub again: still refused, found through the tag.
+        assert api.post("/accounts", json={"xpubs": {"BTC": CASES["BTC"][0]}}).status_code == 409
+        # A database from before encryption: plaintext rows are sealed by db.init(), once.
+        with conn:
+            conn.execute("INSERT INTO accounts (api_key_hash, created_at, webhook_secret) VALUES ('legacy', 'x', 'whsec_old')")
+            legacy = conn.execute("SELECT id FROM accounts WHERE api_key_hash = 'legacy'").fetchone()["id"]
+            conn.execute("INSERT INTO account_xpubs (account_id, chain, xpub) VALUES (?, 'DOGE', 'dgub-legacy')", (legacy,))
+    db.init()
+    db.init()  # idempotent
+    with closing(db.connect()) as conn:
+        x = conn.execute("SELECT xpub, xpub_tag FROM account_xpubs WHERE account_id = ?", (legacy,)).fetchone()
+        w = conn.execute("SELECT webhook_secret FROM accounts WHERE id = ?", (legacy,)).fetchone()["webhook_secret"]
+        assert db.unseal(x["xpub"], "xpub") == "dgub-legacy" and x["xpub_tag"] == db.tag("dgub-legacy")
+        assert db.unseal(w, "webhook_secret") == "whsec_old"
+        with conn:
+            conn.execute("DELETE FROM account_xpubs WHERE account_id = ?", (legacy,))
+            conn.execute("DELETE FROM accounts WHERE id = ?", (legacy,))
+
+
 def demo():
+    real_limits = dict(app_module.LIMITS)
+    app_module.LIMITS.update({k: (10**6, 60) for k in real_limits})  # limits are tested at the end
     check_amounts()
     check_webhook_urls()
 
@@ -255,6 +314,7 @@ def demo():
     r = api.put("/accounts/me/webhook", json={"url": hook_url}, headers=key)
     assert r.status_code == 200 and r.json()["secret"].startswith("whsec_"), r.text
     secret = r.json()["secret"]
+    check_sealed(secret)
 
     btc = api.post("/payments", json={"chain": "BTC", "asset": "BTC", "amount": "0.001", "reference": "order-1"}, headers=key).json()
     # Index 0 is the main address (Receive / gas); payments start at index 1.
@@ -308,14 +368,27 @@ def demo():
             raise ChainError("provider down")
         return chain.get((c, asset, address), (0, 0))
 
+    lookups = []  # (chain, address) per hash lookup
+    lookup_down = set()
+
+    def lookup(c, asset, address, since):
+        lookups.append((c, address))
+        if address in lookup_down:
+            raise ChainError("explorer down")
+        if c in ("ETH", "BSC") and asset in ("ETH", "BNB"):
+            return None  # native ETH/BNB: not searchable
+        return ["h" + str(n) + address[-6:] for n in range(1 + min(2, chain.get((c, asset, address), (0, 0))[0] // 10**8))]
+
     t0 = datetime.now(timezone.utc)
     step = lambda minutes: t0 + timedelta(minutes=minutes)
     with closing(db.connect()) as conn:
-        run = lambda when: watcher.tick(conn, now=when, observe=observe)
+        run = lambda when: watcher.tick(conn, now=when, observe=observe, lookup=lookup)
 
         run(step(1))  # nothing paid yet
         status = lambda p: api.get(f"/payments/{p['id']}", headers=key).json()
         assert status(btc)["status"] == "pending" and not Receiver.calls
+        assert not lookups, "no hash lookups while nothing arrived"
+        assert status(btc)["transactions"] == [] and status(btc)["address_url"].endswith("/bitcoin/address/" + btc["address"])
 
         chain[("BTC", "BTC", btc["address"])] = (100_000, 0)       # full amount seen, 0 confirmations
         chain[("TRX", "USDT", trx["address"])] = (5_000_000, 5_000_000)  # half of 10.5 USDT
@@ -323,13 +396,20 @@ def demo():
         run(step(3))
         assert status(btc)["status"] == "confirming" and status(btc)["amount_received"] == "0.001"
         assert status(trx)["status"] == "pending" and status(trx)["amount_received"] == "5"
+        tx = status(btc)["transactions"]
+        assert tx == [{"hash": "h0" + btc["address"][-6:], "url": "https://blockchair.com/bitcoin/transaction/h0" + btc["address"][-6:]}], tx
+        co = api.get(f"/pay/{btc['id']}/status").json()
+        assert "transactions" not in co and co["address_url"].endswith(btc["address"]), "checkout: address link, no hashes"
         assert len(Receiver.calls) == 1
+        assert json.loads(Receiver.calls[0][1])["payment"]["transactions"] == tx, "webhooks carry the hashes"
+        n = len(lookups)
         sig, body = Receiver.calls[0]
         assert webhooks.verify(secret, body, sig), "webhook signature must verify"
         assert json.loads(body)["event"] == "payment.confirming" and json.loads(body)["payment"]["id"] == btc["id"]
 
         chain[("BTC", "BTC", btc["address"])] = (100_000, 100_000)
         run(step(5))
+        assert len(lookups) == n, "confirmations alone don't trigger a lookup (amount unchanged)"
         s = status(btc)
         assert s["status"] == "confirmed" and s["confirmed_at"] and s["amount_confirmed"] == "0.001", s
         assert json.loads(Receiver.calls[-1][1])["event"] == "payment.confirmed"
@@ -348,6 +428,7 @@ def demo():
         chain[("ETH", "ETH", late["address"])] = (5 * 10**17, 0)
         run(step(41))
         assert status(late)["status"] == "confirming"
+        assert status(late)["transactions"] == [] and "etherscan.io/address/" in status(late)["address_url"]
         run(step(40 + 30 + 24 * 60 + 1))
         assert status(late)["status"] == "expired"
 
@@ -372,8 +453,11 @@ def demo():
 
         # Paid after expiry, within 24h: still watched; stays expired, fires payment.paid_late once.
         chain[("BTC", "BTC", btc2["address"])] = (50_000_000, 0)
+        lookup_down.add(btc2["address"])  # the hash lookup failing never blocks the amount/status
         run(step(100))
         assert status(btc2)["status"] == "expired" and status(btc2)["amount_received"] == "0.5"
+        assert status(btc2)["transactions"] == []
+        lookup_down.clear()
         assert json.loads(Receiver.calls[-1][1])["event"] != "payment.paid_late", "not until confirmed"
         chain[("BTC", "BTC", btc2["address"])] = (50_000_000, 50_000_000)
         run(step(120))
@@ -391,17 +475,19 @@ def demo():
         chain[("BSC", "USDT", bsc["address"])] = (3 * 10**18, 3 * 10**18)
         run(step(32 + 24 * 60 + 30))
         assert status(bsc)["amount_received"] == "0", "watcher stops 24h after expiry"
-        real_observe = app_module.chain_client.observe
+        real_observe, real_lookup = app_module.chain_client.observe, app_module.chain_client.tx_hashes
         app_module.chain_client.observe = lambda c, a, addr, n: observe(c, a, addr, n)
+        app_module.chain_client.tx_hashes = lookup
         down.add(fresh["address"])
         try:
             r = api.post("/wallet/scan", headers=key)
         finally:
-            app_module.chain_client.observe = real_observe
+            app_module.chain_client.observe, app_module.chain_client.tx_hashes = real_observe, real_lookup
             down.clear()
         # bsc found, fresh unreachable, the rest checked; btc2 (already received) not rescanned.
         assert r.status_code == 200 and r.json()["found"] == 1 and r.json()["failed"] == 1, r.text
         assert status(bsc)["status"] == "expired" and status(bsc)["amount_received"] == "3"
+        assert status(bsc)["transactions"][0]["url"].startswith("https://bscscan.com/tx/h")
         ev = conn.execute("SELECT event FROM webhook_events WHERE payment_id = ? ORDER BY id DESC", (bsc["id"],)).fetchone()
         assert ev["event"] == "payment.paid_late", "queued; the watcher delivers it"
         assert api.post("/wallet/scan", headers=other).json()["found"] == 0  # only your own payments
@@ -413,8 +499,22 @@ def demo():
         n = conn.execute("SELECT COUNT(*) FROM webhook_events WHERE payment_id = ?", (stale["id"],)).fetchone()[0]
         assert n == 1, f"duplicate webhooks for one transition: {n}"
 
+    check_rate_limits(real_limits)
+    app_module.LIMITS["payments"] = (2, 60)  # per account: another account has its own budget
+    body = {"chain": "BTC", "asset": "BTC", "amount": "1"}
+    assert [api.post("/payments", json=body, headers=key).status_code for _ in range(3)] == [201, 201, 429]
+    assert api.post("/payments", json={"chain": "DOGE", "asset": "DOGE", "amount": "1"}, headers=other).status_code == 201
+    app_module.LIMITS["checkout"] = (1, 60)
+    assert [api.get(f"/pay/{btc['id']}/status").status_code for _ in range(2)] == [200, 429]
+    app_module.LIMITS.update(real_limits)
+
     server.shutdown()
     print("payments self-check OK")
+
+
+def test_selfcheck():
+    """pytest entry point; `python test_payments.py` still works."""
+    demo()
 
 
 if __name__ == "__main__":

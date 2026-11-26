@@ -7,7 +7,7 @@ From cPanel-style cron:  python watcher.py --max-seconds 280  (loop, exit before
 Only one watcher runs at a time per database (lock file next to it); extra starts exit quietly.
 Docs: docs/architecture.md#watcher
 """
-import argparse
+import argparse   
 import logging
 import os
 import signal
@@ -26,7 +26,7 @@ LOOP_SLEEP = 5  # seconds between passes; per-chain pacing is payments.CHECK_EVE
 _stop = False
 
 
-def tick(conn, now=None, observe=chain_client.observe, send=webhooks.send, limit=100):
+def tick(conn, now=None, observe=chain_client.observe, send=webhooks.send, limit=100, lookup=None):
     """One pass. Returns (checked, changed, delivered)."""
     now = now or datetime.now(timezone.utc)
     due = conn.execute(
@@ -47,7 +47,7 @@ def tick(conn, now=None, observe=chain_client.observe, send=webhooks.send, limit
                 conn.execute("UPDATE payments SET next_check_at = ? WHERE id = ?",
                              (db.at(now + timedelta(seconds=payments.CHECK_EVERY[p["chain"]])), p["id"]))
             continue
-        status = payments.apply_observation(conn, p, seen, confirmed, now)
+        status = payments.apply_observation(conn, p, seen, confirmed, now, payments.find_hashes(p, seen, lookup))
         if status != p["status"]:
             changed += 1
             log.info("%s %s/%s %s -> %s", p["id"], p["chain"], p["asset"], p["status"], status)

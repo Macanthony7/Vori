@@ -2,5 +2,5 @@ fastapi>=0.110
 uvicorn>=0.27
 bip_utils>=2.9
 requests>=2.31
+cryptography>=42  # AES-GCM for xpubs and webhook secrets at rest
 python-dotenv>=1.0
-httpx>=0.27  # only for test_payments.py (FastAPI TestClient)

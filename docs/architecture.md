@@ -139,7 +139,7 @@ One pass (`tick`) every 5 s:
 1. Load payments whose `next_check_at` has passed: open ones, plus `expired` ones for 24 h after expiry (late funds, checked every 15 min, `payments.LATE_WATCH` / `LATE_CHECK`).
 2. `chain_client.observe()` returns `(seen, confirmed)` in smallest units.
 3. `payments.next_status()`, a pure function, decides the new status (rules in [api.md](api.md#payment-statuses)).
-4. Store amounts and status. On a change, queue a webhook event in the same transaction. On an expired payment, more confirmed funds queue `payment.paid_late`; amounts never go down there (the merchant may have sent the coins on).
+4. If the amount went up, look up the incoming transaction hashes (`chain_client.tx_hashes`, best effort: a failure only loses the explorer link). Store amounts, hashes and status. On a change, queue a webhook event in the same transaction. On an expired payment, more confirmed funds queue `payment.paid_late`; amounts never go down there (the merchant may have sent the coins on).
 5. `webhooks.deliver_due()` sends queued events and schedules retries.
 
 Per-chain pacing (`payments.CHECK_EVERY`): BTC/LTC/DOGE 60 s (BlockCypher rate limits), ETH 15 s, BSC and TRX 10 s. A provider error never changes a payment's status. The payment is simply retried on schedule.
@@ -187,9 +187,10 @@ SQLite's 64-bit integer.
 accounts                              account_xpubs
 - id                PK                - account_id   FK → accounts.id
 - api_key_hash      UNIQUE (sha256)   - chain        BTC | LTC | DOGE | ETH | TRX
-- plan, plan_expires_at               - xpub         UNIQUE, normalized
+- plan, plan_expires_at               - xpub         normalized, sealed (AES-GCM)
+                                      - xpub_tag     UNIQUE, keyed hash (lookup)
 - created_at                          - next_index   next never-used address index
-- webhook_url, webhook_secret         PK (account_id, chain)
+- webhook_url, webhook_secret (sealed) PK (account_id, chain)
 
 payments                              webhook_events
 - id                PK "pay_…"        - id               PK
@@ -200,6 +201,7 @@ payments                              webhook_events
 - status            pending|confirming|confirmed|expired
 - reference                           - attempts, next_attempt_at (NULL = done)
 - created_at, expires_at, confirmed_at, updated_at, next_check_at
+- tx_hashes         JSON list, oldest first
                                       - delivered_at, last_error
 
 login_challenges                      sessions

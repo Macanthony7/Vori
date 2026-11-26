@@ -156,9 +156,17 @@ Authenticated. Create a payment and get a receive address for it.
   "created_at": "2026-11-22T19:05:11Z",
   "expires_at": "2026-11-22T19:35:11Z",
   "confirmed_at": null,
+  "transactions": [],
+  "address_url": "https://tronscan.org/#/address/TA891Fu7vVz595BGQpNX2MCzr7yBcxuoC7",
   "checkout_url": "https://pay.example.com/pay/pay_iS2n5H0pWQ3kq1HcX9yN0A"
 }
 ```
+
+`transactions`: incoming transactions to the address, oldest first, as
+`{"hash": "…", "url": "<explorer link>"}`. Filled in when the watcher sees the amount go up. Always
+empty for **native ETH and BNB** (also Sepolia ETH): a plain JSON-RPC node can't search transfers by
+address. It can also stay empty if the lookup failed. In those cases `address_url` (the address on
+the block explorer) lists them. Explorers: Blockchair (BTC/LTC/DOGE), Etherscan, BscScan, Tronscan.
 
 Send the customer to `checkout_url` (see [Checkout page](#checkout-page)), or show `address`,
 `amount`, `asset` and the network yourself. For tokens, the network matters: USDT sent on the
@@ -218,6 +226,8 @@ that network. It refreshes every 5 s and follows the status:
 | `expired` | Don't send anything; ask the merchant for a new payment (or contact them if part was received) | no |
 
 The address is hidden once sending is no longer useful, so nobody pays into an expired payment.
+Once anything is received, the page links to the address on the block explorer ("View on the block
+explorer"). It never shows transaction hashes; those are in the API, webhooks and the wallet only.
 QR codes for BTC, LTC and DOGE are BIP21 URIs with the amount (`bitcoin:<address>?amount=0.001`).
 For Ethereum, BSC and Tron the QR is the **bare address**: payment URIs there are read
 inconsistently by wallets and could send the wrong token.
@@ -244,11 +254,12 @@ Public, no API key. The data behind the checkout page. **404** if the payment do
   "created_at": "2026-11-23T10:00:00Z",
   "expires_at": "2026-11-23T10:30:00Z",
   "confirmed_at": null,
+  "address_url": "https://tronscan.org/#/address/TA891Fu7vVz595BGQpNX2MCzr7yBcxuoC7",
   "server_time": "2026-11-23T10:01:12Z"
 }
 ```
 
-Same fields as the payment object **minus `reference`** (your order data stays private), plus
+Same fields as the payment object **minus `reference`** (your order data stays private) and `transactions`, plus
 `amount_due` (amount minus received, never below 0) and `server_time` (so the countdown is right
 even when the payer's clock is wrong). Don't use it from your server: use the authenticated
 `GET /payments/{id}`.
@@ -506,6 +517,25 @@ function verify(secret, rawBody, header, tolerance = 300) {
 ```
 
 ---
+
+## Rate limits
+
+Past a limit the server answers **429** `{"detail": {"error": "too many requests; try again in N s"}}`
+with a `Retry-After` header (seconds). Sliding windows:
+
+| What | Limit | Counted per |
+|---|---|---|
+| `POST /accounts` (sign-up) | 5 per hour | IP |
+| `POST /auth/challenge`, `POST /auth/login` | 20 per minute (together) | IP |
+| `POST /payments` | 60 per minute | account |
+| `GET /pay/{id}/status` (checkout page polls every 5 s) | 120 per minute | IP |
+| `GET /wallet/balances`, `GET`/`POST /wallet/send/{chain}` | 30 per minute (together) | account |
+| `GET /wallet/tx/{chain}/{hash}` (polled while gas top-ups land) | 60 per minute | account |
+| `POST /wallet/scan` | 1 per minute | account |
+
+Counts live in the server's memory: they reset on restart and assume one server process (several
+processes or servers: limit at the reverse proxy instead). Behind a reverse proxy, set
+`GATEWAY_TRUST_PROXY=1` so the visitor's IP is read from `X-Forwarded-For` ([setup.md](setup.md)).
 
 ## Response headers
 

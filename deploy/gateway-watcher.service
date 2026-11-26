@@ -1,0 +1,21 @@
+# /etc/systemd/system/gateway-watcher.service. Guide: docs/deploy.md
+[Unit]
+Description=Payment gateway watcher (payment status, webhooks)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=gateway
+Group=gateway
+WorkingDirectory=/opt/gateway/app/backend
+ExecStart=/opt/gateway/venv/bin/python watcher.py
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/gateway/app/backend
+
+[Install]
+WantedBy=multi-user.target
