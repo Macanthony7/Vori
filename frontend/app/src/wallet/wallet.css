@@ -162,3 +162,6 @@ a.button-link.secondary { background: var(--surface); color: var(--ink); border:
 @media (prefers-color-scheme: dark) and (max-width: 899px) {
     .nav { box-shadow: 0 0 0 1px var(--line), 0 12px 32px -12px #000; } /* the floating bar needs an edge on a dark ground */
 }
+.scan { margin: var(--s4) 0; }
+.scan .qr { margin: 0 0 var(--s2); }
+.scan .note { margin: 0 auto; max-width: 40ch; }

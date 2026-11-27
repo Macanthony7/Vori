@@ -1,7 +1,7 @@
 // Wallet tab: home (total, actions, coins), coin picker, coin screen with chart, Receive, Send, New payment.
 import { useEffect, useState } from "react";
 import { CoinIcon, TESTNETS } from "../coins";
-import { Qr } from "../qr";
+import { CheckoutQr, Qr } from "../qr";
 import { api, type Balance } from "./api";
 import { useWallet } from "./context";
 import { PaymentRow } from "./PaymentsTab";
@@ -346,6 +346,7 @@ function Charge() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<React.ReactNode>(null);
+  const [made, setMade] = useState<string | null>(null); // the new payment's id, for its QR code
   const options = w.balances.map(key);
   const chosen = options.includes(net) ? net : (!net && options.includes("SEPOLIA/ETH") ? "SEPOLIA/ETH" : options[0] || "");
 
@@ -358,6 +359,7 @@ function Charge() {
     const [chain, asset] = chosen.split("/");
     setError("");
     setResult(null);
+    setMade(null);
     setBusy(true);
     try {
       const p = await api<{ id: string; chain?: string; asset: string; amount: string; address: string; price?: string; currency?: string }>(
@@ -366,6 +368,7 @@ function Charge() {
         {"Payment created: " + (p.chain ? `${p.amount} ${p.asset} to ${p.address}` : `${p.price} ${p.currency}, the payer picks the coin`) + ". "}
         <a href={"/pay/" + encodeURIComponent(p.id)} target="_blank" rel="noopener">Open the checkout page</a>
       </>);
+      setMade(p.id);
       w.loadPayments();
     } catch (e) {
       setError((e as Error).message);
@@ -400,6 +403,7 @@ function Charge() {
         <p className="error" id="charge-error" role="alert">{error}</p>
         <button type="button" id="charge-create" className="wide" disabled={busy} onClick={create}>Create checkout</button>
         <p id="charge-result" className="status-good" role="status" hidden={!result}>{result}</p>
+        {made && <CheckoutQr id="charge-qr" paymentId={made} />}
       </div>
     </Screen>
   );

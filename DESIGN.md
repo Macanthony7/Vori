@@ -224,6 +224,8 @@ Dark mode redefines every token under `prefers-color-scheme: dark` (values in `.
 
 **The Black-on-White QR Rule.** QR codes render black on `qr-field` with a 12px quiet zone and a hairline border, including in dark mode. Some scanners fail on inverted codes.
 
+**Where there are QR codes:** wherever a payment is taken. Receive (the main address), the checkout page (the address, with the amount for BTC/LTC/DOGE), and in the wallet after **New payment** and on a payment's detail screen while it's still open (choosing a coin or waiting): there the QR is the **checkout link**, so a customer in front of you scans it with their phone camera and pays on the checkout page. Each has one line under it saying what scanning does.
+
 ## Typography
 
 **Display Font:** System UI sans ("Segoe UI Variable Text", falling back through system-ui, -apple-system, Roboto, Helvetica Neue and Arial)

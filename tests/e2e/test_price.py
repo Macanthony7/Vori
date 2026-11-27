@@ -27,9 +27,15 @@ def test_payer_picks_the_coin_then_pays(page, browser, server, chain, tick, fixe
     link = page.locator("#charge-result a")
     expect(page.locator("#charge-result")).to_contain_text("25.00 USD, the payer picks the coin")
     pid = link.get_attribute("href").split("/")[-1]
+    qr = page.locator("#charge-qr")  # the customer scans it to open the checkout on their phone
+    expect(qr.locator("canvas")).to_be_visible()
+    assert qr.get_attribute("data-text") == f"{server}/pay/{pid}"
     tab(page, "payments")
     row = page.locator(f'#payments li[data-id="{pid}"]')  # this payment's row (others may exist)
     expect(row).to_contain_text("Choosing a coin")
+    row.click()
+    expect(page.locator("#pd-qr canvas")).to_be_visible()  # still open: the QR code again
+    assert page.get_attribute("#pd-qr", "data-text") == f"{server}/pay/{pid}"
 
     for viewport in ({"width": 375, "height": 812}, {"width": 1280, "height": 900}):
         checkout = browser.new_context(base_url=server, viewport=viewport).new_page()

@@ -82,6 +82,7 @@ def test_payment_from_checkout_to_paid(page, browser, server, chain, tick):
     assert page.get_attribute("#pd-explorer", "href").endswith("/bitcoin/address/" + address), \
         "two transactions: the address page lists both"
     assert page.get_attribute("#pd-checkout", "href") == f"/pay/{pid}"
+    assert page.locator("#pd-qr").count() == 0, "paid: no QR code to pay again"
 
 
 def test_expired_payment_then_late_coins(page, chain, tick):

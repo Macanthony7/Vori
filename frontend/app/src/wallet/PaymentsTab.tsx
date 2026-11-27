@@ -1,6 +1,7 @@
 // Payments tab: grouped by day, newest first, with search and status chips; one payment's details.
 import { Fragment, useState } from "react";
 import { CoinIcon } from "../coins";
+import { CheckoutQr } from "../qr";
 import type { Payment } from "./api";
 import { useWallet } from "./context";
 import { Chevron, label, Screen } from "./ui";
@@ -123,6 +124,8 @@ function PaymentDetail() {
         <p id="pd-amount" className="total">{p ? amountText(p) : ""}</p>
         <p id="pd-status">{p && <StatusMark p={p} />}</p>
       </div>
+      {/* Still waiting for the payer: show the checkout page's QR code again */}
+      {p && (p.status === "choosing" || p.status === "pending") && <CheckoutQr id="pd-qr" paymentId={p.id} />}
       <ul id="pd-fields" className="list">
         {fields.filter(([, v]) => v !== undefined && v !== null && v !== "").map(([name, value, mono]) => (
           <li key={name} className="row-static"><span>{name}</span><span className={mono ? "mono" : ""}>{value}</span></li>
