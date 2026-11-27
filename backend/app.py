@@ -4,6 +4,7 @@ Run from backend/:  python -m uvicorn app:app --port 8000
 Payments are watched by a separate process: python watcher.py
 Docs: ../docs/api.md
 """
+import asyncio
 import base64
 import binascii
 import hashlib
@@ -23,7 +24,7 @@ from typing import Optional
 
 from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from bip_utils import Base58Decoder
 from coincurve import PublicKey
@@ -31,6 +32,7 @@ from pydantic import BaseModel, Field
 
 import chain_client
 import db
+import live
 import payments
 import rates
 from assets import ASSETS, EVM_CHAINS, TRON_CHAINS, AmountError, from_units
@@ -88,6 +90,7 @@ LIMITS = {                       # bucket: (requests, per seconds)
     "webhook_test": (6, 60),     # POST /accounts/me/webhook/test, per account (calls the shop's server)
     "hook": (240, 60),           # BlockCypher callbacks, per IP (it retries a few times per event)
     "market": (60, 60),          # GET /market and its chart history, per IP (cached server-side)
+    "market_stream": (20, 60),   # GET /market/stream (re)connects, per account
 }
 # Behind a reverse proxy every request comes from the proxy's IP. Set GATEWAY_TRUST_PROXY=1 only when
 # a proxy you run sets X-Forwarded-For; otherwise visitors could pick their own "IP".
@@ -666,6 +669,46 @@ def market(request: Request, currency: str = "USD"):
         fail(400, f"currency must be one of {', '.join(rates.CURRENCIES)}")
     return {"currency": currency, "coins": {coin: {"price": num(m["price"]), "change_24h": num(m["change_24h"])}
                                             for coin, m in rates.market(currency).items()}}
+
+
+STREAM_SECONDS = 600  # a stream ends after 10 minutes; the wallet reconnects (bounds every connection)
+STREAMS_PER_ACCOUNT = 4
+_streams = {}  # account id -> open streams
+
+
+@app.get("/market/stream")
+async def market_stream(request: Request, authorization: str = Header(None)):
+    """Live USD prices for the wallet (Server-Sent Events): a `data:` event with every coin whenever a
+    price moves, at most once a second. Display only. Needs the wallet session."""
+    acct = account_for(authorization)
+    rate_limit("market_stream", acct["id"])
+    with _hits_lock:
+        if _streams.get(acct["id"], 0) >= STREAMS_PER_ACCOUNT:
+            fail(429, "too many open price streams: close another wallet tab")
+        _streams[acct["id"]] = _streams.get(acct["id"], 0) + 1
+    live.start()
+
+    async def events():
+        try:
+            sent, quiet, until = None, 0, time.monotonic() + STREAM_SECONDS
+            while time.monotonic() < until and not await request.is_disconnected():
+                snap = live.snapshot()
+                if snap and snap != sent:
+                    sent, quiet = snap, 0
+                    coins = {c: {"price": num(p), "change_24h": num(ch)} for c, (p, ch) in snap.items()}
+                    yield "data: " + json.dumps({"currency": "USD", "coins": coins}) + "\n\n"
+                else:
+                    quiet += 1
+                    if quiet >= 15:  # a comment line keeps proxies from closing an idle stream
+                        quiet = 0
+                        yield ": ping\n\n"
+                await asyncio.sleep(1)
+        finally:
+            with _hits_lock:
+                _streams[acct["id"]] -= 1
+
+    return StreamingResponse(events(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
 
 
 @app.get("/market/{coin}/history")

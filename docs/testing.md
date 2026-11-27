@@ -67,6 +67,7 @@ depends on timing or a network. Each test gets a fresh browser profile (its own 
 | `test_samples.py` | The merchant code samples (Python, Node.js, PHP, curl) create a payment on the test server, and each verifier accepts a real signature and rejects altered, wrong-secret, replayed and junk ones |
 | `test_shop.py` | Shop name and logo set in the wallet (oversized logo refused), shown on the checkout page; the logo really renders; 58-character name fits a phone; "Back to shop" hidden while paying, shown after; removing them |
 | `test_price.py` | Price in USD from the wallet form → checkout shows **Choose how to pay** with converted amounts, coins without a rate disabled, fits a phone → pick TRX → address and locked amount → paid → Recent payments shows "= 25.00 USD" |
+| `test_live_prices.py` | A price moving on the server's live feed (faked) shows up on the wallet's coin row, 24 h change and coin screen within seconds |
 | `test_design.py` | The redesign: wallet tabs by keyboard (arrows, Home/End), sign-up by keyboard only, a visible focus ring, no sideways scrolling at 320 and 375 px on every page and wallet tab, payments search and status filter with the no-match state, and **screenshot comparison** of the checkout states (choosing, waiting, partly paid, seen, paid; light and dark) |
 | `test_send.py` | Send BTC (with change), ETH, TRX to a new address, USDT on Tron with a gas top-up; the frame refuses an address the server planted |
 

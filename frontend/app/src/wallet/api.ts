@@ -16,6 +16,25 @@ export async function api<T = any>(method: string, path: string, body?: unknown)
   return data;
 }
 
+// Server-Sent Events read with fetch (EventSource can't send the session header). Calls onData with
+// each `data:` event's JSON; returns when the server ends the stream.
+export async function stream(path: string, onData: (data: any) => void, signal: AbortSignal) {
+  const res = await fetch(path, { headers: { Authorization: "Bearer " + session }, signal, cache: "no-store" });
+  if (!res.ok || !res.body) throw new Error("HTTP " + res.status);
+  const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+  let buffer = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) return;
+    buffer += value;
+    for (let end = buffer.indexOf("\n\n"); end >= 0; end = buffer.indexOf("\n\n")) {
+      const event = buffer.slice(0, end);
+      buffer = buffer.slice(end + 2);
+      for (const line of event.split("\n")) if (line.startsWith("data: ")) onData(JSON.parse(line.slice(6)));
+    }
+  }
+}
+
 export type Balance = { chain: string; asset: string; balance: string; complete: boolean; main_address: string };
 export type MarketEntry = { price: number | null; change: number | null };
 export type Payment = {

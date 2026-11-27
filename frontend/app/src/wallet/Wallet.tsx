@@ -5,7 +5,7 @@
 // Layout: three tabs (Wallet, Payments, Settings), each a stack of screens. Docs: DESIGN.md#wallet,
 // docs/security.md#wallet-vault, docs/api.md#wallet
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, setSession, hasSession, type Balance, type MarketEntry, type Me, type Payment } from "./api";
+import { api, setSession, hasSession, stream, type Balance, type MarketEntry, type Me, type Payment } from "./api";
 import { Ctx, type Tab, type WalletCtx } from "./context";
 import { CURRENCY, LockIcon, TRON } from "./ui";
 import { WalletTab } from "./WalletTab";
@@ -314,6 +314,30 @@ export function Wallet() {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { document.body.classList.toggle("unlocked", phase === "open"); }, [phase]);
+
+  // Live prices while unlocked (GET /market/stream, display only). On a drop, reconnect after a few
+  // seconds; meanwhile the prices from GET /market stay.
+  useEffect(() => {
+    if (phase !== "open") return;
+    const stop = new AbortController();
+    (async () => {
+      while (!stop.signal.aborted) {
+        try {
+          await stream("/market/stream", (data: { coins: Record<string, { price: string | null; change_24h: string | null }> }) => {
+            setMarket((m) => {
+              const next = { ...m };
+              for (const [c, v] of Object.entries(data.coins)) {
+                next[c] = { price: v.price == null ? null : Number(v.price), change: v.change_24h == null ? m[c]?.change ?? null : Number(v.change_24h) };
+              }
+              return next;
+            });
+          }, stop.signal);
+        } catch { /* dropped or refused: try again below */ }
+        await new Promise((r) => setTimeout(r, 3000));
+      }
+    })();
+    return () => stop.abort();
+  }, [phase]);
   // Height through the CSSOM: the CSP allows no inline style attributes.
   useEffect(() => { if (frame.current) frame.current.style.height = frameHeight == null ? "" : frameHeight + "px"; }, [frameHeight]);
 

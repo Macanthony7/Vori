@@ -196,15 +196,21 @@ MARKET = {"BTC": ("60000", "0.0125"), "ETH": ("1700", "-0.021"), "LTC": ("44", "
 
 @pytest.fixture(autouse=True)
 def fake_market(monkeypatch):
-    """Fixed prices, 24 h changes and chart lines: the wallet's market data never reaches the internet in tests."""
+    """Fixed prices, 24 h changes and chart lines: the wallet's market data never reaches the internet in tests.
+    Returns the live feed's prices ({coin: (price, change)}): empty = feed down; set one to move it live."""
     import math
     from decimal import Decimal
+    import live
     import rates
+    feed = {}
+    monkeypatch.setattr(live, "start", lambda: None)
+    monkeypatch.setattr(live, "snapshot", lambda: dict(feed))
     monkeypatch.setattr(rates, "market", lambda currency="USD": {
         c: {"price": Decimal(p), "change_24h": None if ch is None else Decimal(ch)} for c, (p, ch) in MARKET.items()})
     monkeypatch.setattr(rates, "history", lambda coin, span, currency="USD": [
         (1_700_000_000 + i * 900, Decimal(MARKET[coin][0]) * (1 + Decimal(str(round(0.03 * math.sin(i / 5) + 0.0006 * i, 6)))))
         for i in range(48)])
+    return feed
 
 
 def unlock(pg, password=PASSWORD):

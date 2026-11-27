@@ -1,5 +1,6 @@
 fastapi>=0.110
 uvicorn>=0.27
+websockets>=15  # live prices from Kraken (backend/live.py)
 bip_utils>=2.9
 requests>=2.31
 cryptography>=42  # AES-GCM for xpubs and webhook secrets at rest

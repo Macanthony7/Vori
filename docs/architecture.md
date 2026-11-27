@@ -226,6 +226,7 @@ the API and the watcher write at the same time.
 | `backend/chain_client.py` | Read-only provider queries (`observe` for payments, `balance` for the wallet) |
 | `backend/webhooks.py` | URL safety checks, HMAC signing/verifying, delivery with retries |
 | `backend/watcher.py` | Background loop tying the above together; single-instance lock, cron mode |
+| `backend/live.py` | Live prices for the wallet: one WebSocket to Kraken's public ticker, streamed to wallets by `GET /market/stream` (display only) |
 | `backend/test_xpubs.py`, `backend/test_payments.py` | Self-checks |
 | `frontend/build_frame.py` | Inlines `frame/` + `public/styles.css` into `public/derive.html`, pins CSP hashes |
 | `frontend/frame/derive.src.html`, `frontend/frame/derive.js` | Seed frame source: UI, derivation, vault encryption, unlock |

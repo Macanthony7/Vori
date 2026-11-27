@@ -503,6 +503,24 @@ Closing prices from Kraken's public candles, oldest first: `{"coin": "BTC", "spa
 Cached 60 s (1H) or 5 minutes; failures aren't cached and return `points: []`. Unknown coin, span or
 currency: 404.
 
+### Live prices
+
+`GET /market/stream` with the wallet session (`Authorization: Bearer gws_...`): Server-Sent Events,
+USD only. One `data:` event with every coin the feed has, sent whenever a price moves (checked once a
+second), and a `: ping` comment every 15 s when nothing changes:
+
+```
+data: {"currency": "USD", "coins": {"BTC": {"price": "59806.4", "change_24h": "-0.0165"}, ...}}
+```
+
+- **Source:** one WebSocket from the server to Kraken's public ticker (`backend/live.py`), shared by
+  every open wallet, so wallets never talk to an exchange. It starts with the first stream and
+  reconnects on its own. `change_24h` is Kraken's rolling 24 h change. USDT isn't in the feed
+  (it stays at 1 USD from `GET /market`).
+- **Feed down** (no message from Kraken for 30 s): only pings; the wallet keeps the `GET /market` prices.
+- A stream ends after 10 minutes; the wallet reconnects. At most 4 open streams per account (429 beyond).
+- Display only, like everything in this section.
+
 ## Payment statuses
 
 ```mermaid
@@ -655,6 +673,7 @@ with a `Retry-After` header (seconds). Sliding windows:
 | `GET /wallet/tx/{chain}/{hash}` (polled while gas top-ups land) | 60 per minute | account |
 | `POST /wallet/scan` | 1 per minute | account |
 | `GET /market`, `GET /market/{coin}/history` | 60 per minute (together) | IP |
+| `GET /market/stream` (connects) | 20 per minute, at most 4 open | Account |
 
 Counts live in the server's memory: they reset on restart and assume one server process (several
 processes or servers: limit at the reverse proxy instead). Behind a reverse proxy, set
