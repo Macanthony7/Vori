@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; form-action 'none'; base-uri 'none'">
+    <meta name="referrer" content="no-referrer">
+    <meta name="robots" content="noindex">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <title>Payment</title>
+</head>
+<body>
+<div id="root"></div>
+<!-- QR library: a plain script (not bundled), the same file the wallet uses -->
+<script src="/vendor/kjua.js"></script>
+<script type="module" src="./src/pay/main.tsx"></script>
+</body>
+</html>

@@ -43,7 +43,7 @@ flowchart TB
 
 | Layer | Files | What it proves |
 |---|---|---|
-| Static | `frontend/build_frame.py --check`, `node --check` | `derive.html` matches its sources (nobody edited `frame/` without rebuilding, or edited the built file by hand); every script parses |
+| Static | `frontend/build_frame.py --check`, `node --check`, `npm run typecheck`, a fresh Vite build compared with `frontend/public/app/` | `derive.html` matches its sources (nobody edited `frame/` without rebuilding, or edited the built file by hand); every script parses; the React app type-checks and its committed build is up to date |
 | Unit: addresses | `backend/test_xpubs.py` | All 5 xpub families derive the reference addresses; private keys, wrong versions, depths and checksums are refused |
 | Unit: rates | `backend/test_rates.py` | Kraken/Coinbase parsing, the 2% agreement rule, single-source coins, USDT = 1 USD, 60 s cache, failures not cached, rounding up |
 | Unit: providers | `backend/test_chain_client.py` | BlockCypher, JSON-RPC and TronGrid answers are parsed right: amounts, confirmations, fee math, transaction hashes, errors, and API keys never in error messages |
@@ -91,7 +91,7 @@ on; CI's Chromium records its own on each run (nothing to compare there until go
 process, so browser tests count) and **fails below 90%** (`COVERAGE_MIN`). The line-by-line report is
 in `htmlcov/index.html` after a run (CI keeps it as the `coverage-html` artifact).
 
-What isn't measured: the JavaScript (`wallet.js`, `pay.js`, `app.js`, the frame). The E2E tests cover
+What isn't measured: the JavaScript and TypeScript (`wallet.js`, `frontend/app/`, the frame). The E2E tests cover
 it by behavior instead. Add JavaScript coverage (Chromium's built-in coverage via Playwright) if a
 frontend bug ever gets through.
 

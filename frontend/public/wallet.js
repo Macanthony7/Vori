@@ -1,4 +1,4 @@
-// Wallet page. Holds only the password-encrypted vault (saved by app.js at signup) and hands it to
+// Wallet page. Holds only the password-encrypted vault (saved by the sign-up page) and hands it to
 // the sandboxed, offline frame, which asks for the password and keeps the unlocked keys.
 // After unlock the frame signs a login challenge, and the dashboard uses the resulting session.
 // This page can reach our server, so it must never see the password or the phrase.
@@ -7,8 +7,8 @@
 (function () {
     "use strict";
 
-    var VAULT_KEY = "wallet.vault.v1"; // written by app.js
-    var FRAME_TIMEOUT_MS = 12000;       // same as app.js: the inlined engine is ~3.6 MB
+    var VAULT_KEY = "wallet.vault.v1"; // written by the sign-up page (frontend/app/src/signup)
+    var FRAME_TIMEOUT_MS = 12000;       // same as sign-up: the inlined engine is ~3.6 MB
     var NETWORKS = { // [what it is, which network]
         "BTC/BTC": ["BTC", "Bitcoin"],
         "LTC/LTC": ["LTC", "Litecoin"],

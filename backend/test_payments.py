@@ -553,7 +553,7 @@ def demo():
     assert "reference" not in api.get(f"/pay/{btc['id']}/status").text  # merchant's order data stays private
     assert api.get("/pay/pay_doesnotexist/status").status_code == 404
     r = api.get(f"/pay/{trx['id']}")
-    assert r.status_code == 200 and "/pay.js" in r.text, r.status_code
+    assert r.status_code == 200 and '<div id="root">' in r.text and "/app/assets/" in r.text, r.status_code
 
     check_wallet_login()
     check_shop_and_idempotency()

@@ -129,6 +129,20 @@ Never use it for anything real.
 Create and import were verified in Chrome. The Claude desktop app's preview browser can't run them
 (it blocks sandboxed frames) and shows the "browser blocked" message instead.
 
+## Building the React pages
+
+The checkout page is React + TypeScript in `frontend/app/` (more pages move there next, see
+[plan.md](plan.md#8-react-rebuild)). The build in `frontend/public/app/` is committed, so the server
+needs no Node. After changing anything in `frontend/app/` (or `frontend/public/styles.css`), run:
+
+```powershell
+cd frontend/app; npm ci; npm run build
+```
+
+`npm ci` installs the exact versions in `package-lock.json`; `.npmrc` turns off install scripts.
+Add or update a package only to a release at least two weeks old. `python run_tests.py` fails if the
+committed build doesn't match the sources.
+
 ## Building the seed frame
 
 `frontend/public/derive.html` is **generated**. Edit `frontend/frame/derive.src.html`,

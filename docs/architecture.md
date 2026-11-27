@@ -3,9 +3,9 @@
 ## Components
 
 ```
-Browser (frontend/public)                               Server (backend/)
+Browser (frontend/app, frontend/public)                 Server (backend/)
 ┌─────────────────────────────────────────────┐         ┌──────────────────────────────┐
-│ index.html + app.js   (can reach our server) │  JSON   │ app.py (FastAPI)             │
+│ sign-up page (React)  (can reach our server) │  JSON   │ app.py (FastAPI)             │
 │   │                                          │ ──────▶ │  /accounts  /payments        │
 │   │ postMessage({type:"xpubs"})              │         │  /accounts/me/webhook        │
 │ ┌─▼──────────────────────────────────────┐   │         │  serves frontend/public      │
@@ -14,7 +14,7 @@ Browser (frontend/public)                               Server (backend/)
 │ │ - opaque origin (sandbox=allow-scripts) │   │                 SQLite (gateway.db)
 │ │ - phrase → BIP39 seed → 5 account xpubs │   │                        │
 │ └─────────────────────────────────────────┘   │         ┌──────────────┴───────────────┐
-│ xpub.html + app.js    (paste xpubs directly) │         │ watcher.py (separate process)│
+│ xpub page (React)     (paste xpubs directly) │         │ watcher.py (separate process)│
 └─────────────────────────────────────────────┘         │  chain_client → providers    │
                                                          │  payments.next_status()      │
 Merchant's server ◀──── signed webhooks ──────────────── │  webhooks.deliver_due()      │
@@ -32,7 +32,7 @@ Two design rules:
 ```mermaid
 sequenceDiagram
     participant U as Merchant
-    participant P as index.html (app.js)
+    participant P as Sign-up page (frontend/app/src/signup)
     participant F as derive.html (sandboxed, offline)
     participant S as Server
     U->>P: choose "Create" or "Import"
@@ -231,9 +231,10 @@ the API and the watcher write at the same time.
 | `frontend/frame/derive.src.html`, `frontend/frame/derive.js` | Seed frame source: UI, derivation, vault encryption, unlock |
 | `frontend/frame/sandbox-shim.js` | In-memory `localStorage` (sandboxed frames can't touch storage) + error reporting |
 | `frontend/frame/vendor/` | Unmodified BIP39 engine from Ian Coleman's tool, with `SHA256SUMS` |
-| `frontend/public/index.html`, `xpub.html`, `app.js`, `styles.css` | Onboarding pages |
+| `frontend/public/styles.css` | Design tokens and shared components: imported by the React pages and inlined into the frame |
 | `frontend/public/wallet.html`, `wallet.js`, `wallet.css` | Wallet page: unlock, sign-in, balances, Receive, recent payments, new API key, lock, remove from this device |
-| `frontend/public/pay.html`, `pay.js`, `pay.css` | Checkout page for payers, served at `/pay/{id}` |
+| `frontend/app/` | React + TypeScript pages (Vite): `index.html`/`xpub.html` + `src/signup/` are sign-up (served at `/` and `/xpub.html`); `pay.html` + `src/pay/` is the checkout page for payers; `src/coins.tsx` is shared coin data and marks. Build with `npm run build` |
+| `frontend/public/app/` | **Built** React pages (committed, don't edit): served as is: `/`, `/xpub.html` and `/pay/{id}` return its pages |
 | `frontend/public/vendor/wallet-core/` | Signing engine (Trust Wallet Core 4.8.7 + protobufjs minimal), unmodified, pinned by `SHA256SUMS`; see its `NOTICE.md` |
 | `frontend/public/vendor/kjua.js` | QR codes (MIT), extracted unchanged from the vendored BIP39 bundle |
 | `frontend/public/derive.html` | **Generated** seed frame (don't edit) |

@@ -16,6 +16,7 @@ Nothing counts as done until `python run_tests.py` passes and its docs are updat
 | 5 | UI/UX redesign: sign-up, wallet, checkout | Large | ✅ |
 | 6 | Launch prep: BlockCypher hooks, smaller signing engine, deploy, mainnet test | Medium | 🔄 (code done; deploy and mainnet test are yours) |
 | 7 | Gem-style layout (wallet, sign-up, checkout); extension and phone app plan | Large | ✅ |
+| 8 | React rebuild (Vite + TypeScript): checkout, sign-up, wallet | Large | 🔄 (checkout and sign-up done) |
 
 Decisions still open are marked **Decide:** and get settled before the item starts.
 
@@ -234,3 +235,31 @@ now cover every Settings screen, the coin screen and the tab bar; checkout golde
   Android Keystore), unlocked with Face ID or fingerprint.
 - Not started: each needs its own plan item with tests when it's next.
 
+---
+
+## 8. React rebuild 🔄
+
+The same design and behaviour, rebuilt as React components in TypeScript, one page at a time, each
+with the whole test suite passing.
+
+**Decided:**
+- **React + Vite, not Next.js.** Next.js needs inline scripts and a per-request nonce, so a Node
+  server; Vite builds plain files with no inline script, so the strict CSP (`script-src 'self'`)
+  stays as it is and FastAPI keeps serving everything. Vite is also the usual base for an MV3 extension.
+- **The build is committed** (`frontend/public/app/`), like `derive.html`: no Node on the server.
+  `run_tests.py` type-checks and rebuilds into a temp folder and fails if the committed build differs.
+- **The phrase frame stays plain JS**, built and hash-pinned as today: no framework or npm code where
+  the phrase lives. The React wallet will talk to it with the same messages.
+- **The API stays where it is.** With FastAPI serving the pages, `/pay/{id}` (page) and
+  `/pay/{id}/status` (API) don't clash; moving it under `/api` would have broken the shop API.
+- Packages: exact versions, lockfile, install scripts off (`.npmrc`), releases at least two weeks old.
+  React 19.3.1, Vite 8.3.8, TypeScript 7.0.2.
+- Same element ids, so the E2E tests and goldens check the rebuild unchanged.
+
+**Steps:**
+1. ✅ Set-up and the **checkout page** (`frontend/app/pay.html`, `src/pay/`): every state; the
+   checkout E2E tests and goldens pass unchanged.
+2. ✅ **Sign-up** (`index.html`, `xpub.html`, `src/signup/`): welcome, create/import around the frame,
+   xpub-only; served at `/` and `/xpub.html`. `app.js` is gone.
+3. ⬜ **Wallet**: tabs, coin screen, chart, send, receive, payments, settings.
+4. ⬜ Remove the old `wallet.html`/`wallet.js`/`wallet.css`; update the docs.

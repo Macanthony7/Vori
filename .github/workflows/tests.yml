@@ -21,10 +21,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/app/package-lock.json
       - name: Install
         run: |
           pip install -r backend/requirements.txt -r requirements-dev.txt
           python -m playwright install --with-deps chromium
+          npm ci --prefix frontend/app
       - name: Test
         run: python run_tests.py
       - name: Coverage report

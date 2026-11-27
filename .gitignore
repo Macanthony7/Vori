@@ -26,3 +26,6 @@ __pycache__/
 .coverage
 .coverage.*
 htmlcov/
+
+# --- Frontend app: dependencies (the build in frontend/public/app/ is committed) ---
+node_modules/

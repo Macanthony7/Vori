@@ -854,8 +854,19 @@ def blockcypher_hook(payment_id: str, request: Request, t: str = ""):
 
 @app.get("/pay/{payment_id}", include_in_schema=False)
 def checkout_page(payment_id: str):
-    return FileResponse(PUBLIC / "pay.html")  # the page loads its data from /pay/{id}/status
+    return FileResponse(PUBLIC / "app" / "pay.html")  # React build (frontend/app); loads its data from /pay/{id}/status
 
 
-# Frontend (onboarding pages). Mounted last so API routes win.
+@app.get("/", include_in_schema=False)
+@app.get("/index.html", include_in_schema=False)
+def signup_page():
+    return FileResponse(PUBLIC / "app" / "index.html")  # React build (frontend/app)
+
+
+@app.get("/xpub.html", include_in_schema=False)
+def xpub_page():
+    return FileResponse(PUBLIC / "app" / "xpub.html")
+
+
+# Frontend (other pages, scripts, styles). Mounted last so API routes win.
 app.mount("/", StaticFiles(directory=PUBLIC, html=True), name="static")

@@ -18,11 +18,13 @@ deploy/       Caddyfile and systemd units for a VPS (docs/deploy.md)
 
 ```
 frontend/
-  public/           served as-is: index.html, xpub.html, app.js, styles.css,
+  public/           served as-is: wallet.html, wallet.js, styles.css,
                     derive.html (GENERATED), tools/ (offline xpub tool download)
   frame/            SOURCE of the seed frame: derive.src.html, derive.js, sandbox-shim.js,
                     vendor/ (unmodified BIP39 engine, MIT, with SHA256SUMS)
   build_frame.py    builds public/derive.html from frame/
+  app/              SOURCE of the React pages (Vite + TypeScript): sign-up, xpub, checkout;
+                    `npm run build` writes public/app/ (BUILT, committed)
 backend/
   app.py            API routes; serves ../frontend/public
   db.py             SQLite schema, migrations, timestamps
@@ -85,7 +87,7 @@ python watcher.py
 Open <http://localhost:8000>. API docs: <http://localhost:8000/api/docs>.
 
 Tests: `python run_tests.py` from the repository root runs everything: backend tests, E2E browser tests and coverage ([docs/testing.md](docs/testing.md)). What's left before launch: [docs/plan.md](docs/plan.md).
-After editing the seed frame, run `python build_frame.py` from `frontend/`.
+After editing the seed frame, run `python build_frame.py` from `frontend/`; after editing `frontend/app/`, run `npm run build` there.
 Provider keys and deployment notes are in [docs/setup.md](docs/setup.md).
 
 ## Documentation
