@@ -472,6 +472,37 @@ Authenticated; EVM and Tron chains. `{"done": true, "ok": true}` once the transa
 and succeeded (`ok: false`: included but failed), `{"done": false}` while pending. The wallet page
 uses it to wait for gas top-ups before relaying token transfers.
 
+## Market data
+
+For the wallet's display only (prices on coin rows, the total, the chart). Never used to price a
+payment: that's [Prices in USD or EUR](#prices-in-usd-or-eur), with two sources that must agree. No
+authentication.
+
+### `GET /market?currency=USD`
+
+```json
+{"currency": "USD", "coins": {"BTC": {"price": "60684.9", "change_24h": "0.0125"}, "TRX": {"price": null, "change_24h": null}}}
+```
+
+`price` comes from the same trusted rates as payments; `change_24h` is a fraction (0.0125 = +1.25%)
+against the first price of the last 24 hours. `null` means unknown right now, never zero. `currency` is
+`USD` or `EUR`.
+
+### `GET /market/{coin}/history?span=1D&currency=USD`
+
+Closing prices from Kraken's public candles, oldest first: `{"coin": "BTC", "span": "1D", "currency": "USD", "points": [[1764201600, "60684.9"], ...]}`.
+
+| `span` | Candle | Points |
+|---|---|---|
+| `1H` | 1 minute | 60 |
+| `1D` | 15 minutes | 96 |
+| `1W` | 1 hour | 168 |
+| `1M` | 4 hours | 180 |
+| `1Y` | 1 day | 365 |
+
+Cached 60 s (1H) or 5 minutes; failures aren't cached and return `points: []`. Unknown coin, span or
+currency: 404.
+
 ## Payment statuses
 
 ```mermaid
@@ -623,6 +654,7 @@ with a `Retry-After` header (seconds). Sliding windows:
 | `GET /wallet/balances`, `GET`/`POST /wallet/send/{chain}` | 30 per minute (together) | account |
 | `GET /wallet/tx/{chain}/{hash}` (polled while gas top-ups land) | 60 per minute | account |
 | `POST /wallet/scan` | 1 per minute | account |
+| `GET /market`, `GET /market/{coin}/history` | 60 per minute (together) | IP |
 
 Counts live in the server's memory: they reset on restart and assume one server process (several
 processes or servers: limit at the reverse proxy instead). Behind a reverse proxy, set

@@ -32,6 +32,7 @@ from pydantic import BaseModel, Field
 import chain_client
 import db
 import payments
+import rates
 from assets import ASSETS, EVM_CHAINS, TRON_CHAINS, AmountError, from_units
 import webhooks
 from webhooks import WebhookError, check_url
@@ -86,6 +87,7 @@ LIMITS = {                       # bucket: (requests, per seconds)
     "scan": (1, 60),             # POST /wallet/scan, per account
     "webhook_test": (6, 60),     # POST /accounts/me/webhook/test, per account (calls the shop's server)
     "hook": (240, 60),           # BlockCypher callbacks, per IP (it retries a few times per event)
+    "market": (60, 60),          # GET /market and its chart history, per IP (cached server-side)
 }
 # Behind a reverse proxy every request comes from the proxy's IP. Set GATEWAY_TRUST_PROXY=1 only when
 # a proxy you run sets X-Forwarded-For; otherwise visitors could pick their own "IP".
@@ -650,6 +652,31 @@ def send_broadcast(chain: str, body: Broadcast, authorization: str = Header(None
     if error and not hashes:
         fail(502, error)
     return {"chain": chain, "tx_hashes": hashes, "error": error}
+
+
+def num(value):
+    return None if value is None else format(value.normalize(), "f")
+
+
+@app.get("/market")
+def market(request: Request, currency: str = "USD"):
+    """Price and 24 h change per coin, for the wallet's display (never for pricing a payment)."""
+    rate_limit("market", client_ip(request))
+    if currency not in rates.CURRENCIES:
+        fail(400, f"currency must be one of {', '.join(rates.CURRENCIES)}")
+    return {"currency": currency, "coins": {coin: {"price": num(m["price"]), "change_24h": num(m["change_24h"])}
+                                            for coin, m in rates.market(currency).items()}}
+
+
+@app.get("/market/{coin}/history")
+def market_history(coin: str, request: Request, span: str = "1D", currency: str = "USD"):
+    """Closing prices for the wallet's chart: [[unix time, price], ...], oldest first."""
+    rate_limit("market", client_ip(request))
+    coin, span = coin.upper(), span.upper()
+    if coin not in rates.COINS or span not in rates.SPANS or currency not in rates.CURRENCIES:
+        fail(404, "unknown coin, span or currency")
+    return {"coin": coin, "span": span, "currency": currency,
+            "points": [[t, num(p)] for t, p in rates.history(coin, span, currency)]}
 
 
 @app.get("/wallet/tx/{chain}/{tx_hash}")

@@ -7,7 +7,7 @@ import pytest
 from playwright.sync_api import expect
 
 import webhooks
-from conftest import import_wallet, tab, unlock
+from conftest import import_wallet, new_payment, screen, tab, unlock
 
 
 class Shop(BaseHTTPRequestHandler):
@@ -35,7 +35,7 @@ def shop():
 
 
 def open_section(page, section):
-    tab(page, {"webhooks": "settings", "integration": "integration"}[section])
+    screen(page, section)
 
 
 def test_webhook_screen_save_test_deliveries_remove(page, shop, chain, tick):
@@ -66,11 +66,7 @@ def test_webhook_screen_save_test_deliveries_remove(page, shop, chain, tick):
     expect(page.locator("#hook-result")).to_contain_text("Not delivered: HTTP 500")
 
     # A real event shows up under Recent deliveries.
-    tab(page, "overview")
-    page.fill("#charge-amount", "2")
-    page.select_option("#charge-network", "TRX/USDT")
-    page.click("#charge-create")
-    pid = page.locator("#charge-result a").get_attribute("href").split("/")[-1]
+    pid = new_payment(page, "2", "TRX/USDT")
     import db
     from contextlib import closing
     with closing(db.connect()) as conn:
@@ -80,7 +76,7 @@ def test_webhook_screen_save_test_deliveries_remove(page, shop, chain, tick):
     page.reload()
     unlock(page)
     open_section(page, "webhooks")
-    row = page.locator("#hook-deliveries tbody tr", has_text=pid)
+    row = page.locator("#hook-deliveries li", has_text=pid)
     expect(row).to_contain_text("payment.confirmed")
 
     page.click("#hook-remove")

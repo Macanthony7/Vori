@@ -16,14 +16,21 @@ def test_create_wallet_confirms_backup_and_gets_api_key(page):
     f.locator("#c-ack").check()
     f.locator("#c-next").click()
 
-    checks = f.locator("#c-checks input")
+    checks = f.locator("#c-checks fieldset")
     assert checks.count() == 3
-    checks.nth(0).fill("wrong")
     f.locator("#c-done").click()
-    assert "don't match" in f.locator("#c-error").inner_text()
+    assert "don't match" in f.locator("#c-error").inner_text(), "nothing picked yet"
+    words = [w.split()[-1] for w in words]
     for i in range(3):
         pos = int(checks.nth(i).get_attribute("data-pos"))
-        checks.nth(i).fill(words[pos].strip())
+        options = checks.nth(i).locator("label").all_inner_texts()
+        assert len(options) == 3 and words[pos] in options and set(options) <= set(words), "decoys come from the phrase"
+        wrong = next(o for o in options if o != words[pos])
+        checks.nth(i).locator("label").filter(has_text=re.compile(f"^{wrong if i == 0 else words[pos]}$")).click()
+    f.locator("#c-done").click()
+    assert "don't match" in f.locator("#c-error").inner_text(), "a wrong word is refused"
+    pos = int(checks.nth(0).get_attribute("data-pos"))
+    checks.nth(0).locator("label").filter(has_text=re.compile(f"^{words[pos]}$")).click()
     f.locator("#c-done").click()
 
     set_password(f, "short")  # rejected: too short

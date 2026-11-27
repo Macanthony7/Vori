@@ -727,6 +727,17 @@
         return picked.sort(function (a, b) { return a - b; });
     }
 
+    function shuffled(items) { // Fisher-Yates with crypto randomness
+        var out = items.slice(), buf = new Uint32Array(1);
+        for (var i = out.length - 1; i > 0; i--) {
+            crypto.getRandomValues(buf);
+            var j = buf[0] % (i + 1), t = out[i];
+            out[i] = out[j];
+            out[j] = t;
+        }
+        return out;
+    }
+
     // --- Create a new wallet --------------------------------------------------------------------
     var created = null;
 
@@ -745,18 +756,30 @@
     $id("c-ack").addEventListener("change", function () { $id("c-next").disabled = !this.checked; });
 
     $id("c-next").addEventListener("click", function () {
-        var box = $id("c-checks");
+        // Three positions; for each, tap the right word among three taken from the phrase itself.
+        var box = $id("c-checks"), words = created.split(" ");
         box.textContent = "";
         randomPositions(3, 12).forEach(function (pos) {
-            var label = document.createElement("label");
-            label.textContent = "Word #" + (pos + 1);
-            var input = document.createElement("input");
-            input.dataset.pos = pos;
-            input.autocomplete = "off";
-            input.spellcheck = false;
-            input.setAttribute("autocapitalize", "off");
-            label.appendChild(input);
-            box.appendChild(label);
+            var set = document.createElement("fieldset");
+            set.dataset.pos = pos;
+            var legend = document.createElement("legend");
+            legend.textContent = "Word #" + (pos + 1);
+            set.appendChild(legend);
+            var choices = [words[pos]];
+            shuffled(words).forEach(function (w) { // decoys from the same phrase, in random order
+                if (choices.length < 3 && choices.indexOf(w) < 0) choices.push(w);
+            });
+            shuffled(choices).forEach(function (w) {
+                var label = document.createElement("label");
+                label.className = "word-choice";
+                var input = document.createElement("input");
+                input.type = "radio";
+                input.name = "c-" + pos;
+                input.value = w;
+                label.append(input, w);
+                set.appendChild(label);
+            });
+            box.appendChild(set);
         });
         $id("c-error").textContent = "";
         $id("c-show").hidden = true;
@@ -771,8 +794,9 @@
 
     $id("c-done").addEventListener("click", function () {
         var words = created.split(" ");
-        var wrong = Array.prototype.some.call($id("c-checks").querySelectorAll("input"), function (input) {
-            return normalizePhrase(input.value) !== words[Number(input.dataset.pos)];
+        var wrong = Array.prototype.some.call($id("c-checks").querySelectorAll("fieldset"), function (set) {
+            var picked = set.querySelector("input:checked");
+            return !picked || picked.value !== words[Number(set.dataset.pos)];
         });
         if (wrong) {
             $id("c-error").textContent = "Those words don't match. Check your written phrase, or go back and look again.";

@@ -84,3 +84,31 @@ def test_convert_rounds_up_never_undercharges(net, monkeypatch):
     for price in ("0.01", "1", "99.99", "12345.67"):
         a, r = rates.convert(price, "USD", "BTC", 8)
         assert Decimal(a) * Decimal(r) >= Decimal(price) and (Decimal(a) - Decimal("1e-8")) * Decimal(r) < Decimal(price)
+
+
+def test_market_history_and_24h_change(monkeypatch):
+    """Chart candles (shape recorded from Kraken's OHLC on 2026-11-27) and the 24 h change from the first one."""
+    calls = []
+
+    def get(url, params=None, **kw):
+        calls.append(params)
+
+        class R:
+            def json(self):
+                if params["pair"] == "XDGUSD":
+                    return {"error": ["EQuery:Unknown asset pair"]}
+                return {"error": [], "result": {params["pair"]: [
+                    [1733529600 + i * 900, "1", "1", "1", str(100 + i), "1", "1", 1] for i in range(120)], "last": 1}}
+        return R()
+    monkeypatch.setattr(rates.requests, "get", get)
+    monkeypatch.setattr(rates, "current", lambda c: {"BTC": Decimal("219.5"), "USDT": Decimal(1)})
+    rates._history.clear()
+    points = rates.history("BTC", "1D")
+    assert len(points) == 96 and points[0] == (1733529600 + 24 * 900, Decimal(124)), "the last 96 quarter hours"
+    assert rates.history("BTC", "1D") is points and len(calls) == 1, "cached"
+    m = rates.market("USD")
+    assert m["BTC"] == {"price": Decimal("219.5"), "change_24h": Decimal("0.7702")}, "(219.5 - 124) / 124"
+    assert m["DOGE"] == {"price": None, "change_24h": None}, "no rate, no candles: unknown, not zero"
+    assert m["ETH"]["price"] is None and m["ETH"]["change_24h"] is None
+    assert rates.history("DOGE", "1D") == [] and ("DOGE", "1D", "USD") not in rates._history, "failures aren't cached"
+    rates._history.clear()

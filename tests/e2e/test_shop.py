@@ -5,7 +5,7 @@ import zlib
 import httpx
 from playwright.sync_api import expect
 
-from conftest import import_wallet, tab, unlock
+from conftest import import_wallet, screen, tab, unlock
 
 LONG_NAME = "The Extraordinarily Long Named Corner Coffee Roastery Shop"  # 58 chars: layout check
 
@@ -22,7 +22,7 @@ def tiny_png(width=40, height=20):
 def test_shop_branding_and_return_link(page, browser, server, chain, tick, tmp_path):
     import_wallet(page)
     unlock(page)
-    tab(page, "settings")
+    screen(page, "shop-settings")
     logo = tmp_path / "logo.png"
     logo.write_bytes(tiny_png())
     page.fill("#shop-name", LONG_NAME)
@@ -37,6 +37,7 @@ def test_shop_branding_and_return_link(page, browser, server, chain, tick, tmp_p
     expect(page.locator("#shop-error")).to_contain_text("100 KB")
 
     # The shop's server creates the payment with a return link (API key from the wallet).
+    screen(page, "api-key-card")
     page.click("#new-key")
     page.click("#new-key")
     page.wait_for_selector("#new-key-box:not([hidden])")
@@ -70,6 +71,7 @@ def test_shop_branding_and_return_link(page, browser, server, chain, tick, tmp_p
         checkout.context.close()
 
     # Removing the logo and name takes them off the checkout page.
+    screen(page, "shop-settings")
     page.locator("#shop-logo-remove").click()
     page.fill("#shop-name", "")
     page.click("#shop-save")

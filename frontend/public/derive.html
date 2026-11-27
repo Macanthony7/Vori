@@ -9,7 +9,7 @@
          Only the inlined script/style blocks, pinned by SHA-256, may run. The signing engine is handed
          over by the parent page and run from blob: URLs only after its SHA-256 matches the values
          pinned inside this script ('wasm-unsafe-eval' lets it start its WebAssembly). See docs/security.md. -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-rhbe9U3F8BCy9jV9qiSgVzwEN0ku2LH7wvnmW4eKGyM=' blob: 'wasm-unsafe-eval'; style-src 'sha256-0MOn7kL+ZP+H8owumqqlRxmECkD4kmis8jtPQxUpMN8='; connect-src 'none'; form-action 'none'; base-uri 'none'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-u/XyobDJvjQ46iRgJ+dAWFIjVBckNc39YjjZWAVdtTo=' blob: 'wasm-unsafe-eval'; style-src 'sha256-HOwWCmFuFcqp6Qig38hXMF+a/OaQL8Uvl3o/LK+NDtk='; connect-src 'none'; form-action 'none'; base-uri 'none'">
     <meta name="referrer" content="no-referrer">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Recovery phrase</title>
@@ -53,6 +53,7 @@
     --warning-bg: var(--wait-bg);
     --warning-text: #5a3b00;
     --radius: 8px;
+    --radius-lg: 14px; /* grouped lists and cards in the app layout */
     --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px; --s7: 48px;
     --t-xs: 0.79rem; --t-sm: 0.889rem; --t-md: 1rem; --t-lg: 1.125rem; --t-xl: 1.266rem; --t-2xl: 1.424rem; --t-3xl: 1.802rem; --t-display: 2.566rem;
     --sans: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -186,27 +187,34 @@ a:hover { text-decoration-thickness: 2px; }
     * { transition-duration: 0ms !important; }
 }
 
-/* --- Sign-up choices ----------------------------------------------------------------------------------- */
+/* --- Sign-up: the welcome screen (emblem, promise, two wide buttons) ----------------------------------- */
+.welcome { max-width: 440px; margin: var(--s6) auto 0; text-align: center; }
+.welcome .lede { margin: var(--s2) auto var(--s5); }
+.welcome .warning { text-align: left; }
+.welcome-mark { display: inline-block; width: 72px; height: 72px; border-radius: 20px; margin-bottom: var(--s4); }
 .options { display: grid; gap: var(--s3); margin-top: var(--s4); }
 .option {
-    display: block;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     width: 100%;
+    min-height: 52px;
     margin: 0;
-    padding: var(--s4) var(--s5);
-    text-align: left;
+    padding: var(--s3) var(--s5);
     background: var(--surface);
     color: var(--ink);
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-    font: inherit;
-    font-weight: 400;
+    border: 1px solid var(--line-strong);
+    border-radius: 999px;
+    font: 600 var(--t-md)/1.3 var(--sans);
     text-decoration: none;
     cursor: pointer;
-    transition: border-color 160ms var(--ease), box-shadow 160ms var(--ease), transform 160ms var(--ease);
+    transition: background-color 160ms var(--ease), border-color 160ms var(--ease);
 }
-.option:hover { border-color: var(--stone); box-shadow: 0 4px 14px -6px rgba(16, 26, 22, 0.28); transform: translateY(-1px); }
-.option strong { display: block; font-size: var(--t-lg); font-weight: 650; margin-bottom: var(--s1); }
-.option span { color: var(--muted); }
+.option:hover { border-color: var(--ink); background: var(--surface-2); }
+.option-main { background: var(--action); color: var(--action-text); border-color: var(--action); }
+.option-main:hover { background: var(--action-hover); border-color: var(--action-hover); }
+.option-quiet { min-height: 44px; border: 0; background: none; color: var(--link); font-weight: 500; text-decoration: underline; text-underline-offset: 0.18em; }
+.option-quiet:hover { background: none; text-decoration-thickness: 2px; }
 
 /* --- Forms ------------------------------------------------------------------------------------------- */
 label { display: block; font-weight: 600; font-size: var(--t-sm); margin: var(--s4) 0 var(--s2); }
@@ -227,7 +235,7 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
 input:hover, textarea:hover, select:hover { border-color: var(--ink); }
 input:focus-visible, textarea:focus-visible, select:focus-visible { outline: none; border-color: var(--focus); box-shadow: 0 0 0 3px var(--gold-bg), 0 0 0 4px var(--focus); }
 /* Keys, addresses and phrases are read character by character: monospace earns its place here. */
-textarea, input[readonly], #send-to, #i-phrase, #c-checks input, #manual input, #hook-secret { font-family: var(--mono); font-size: var(--t-sm); }
+textarea, input[readonly], #send-to, #i-phrase, #manual input, #hook-secret { font-family: var(--mono); font-size: var(--t-sm); }
 input[readonly], textarea[readonly] { background: var(--surface-2); }
 input[type=checkbox] { width: auto; min-height: 0; }
 input[type=file] { padding: var(--s2); min-height: 0; font-size: var(--t-sm); }
@@ -252,8 +260,6 @@ select {
     cursor: pointer;
 }
 input[aria-invalid=true] { border-color: var(--bad); }
-#c-checks label { font-weight: 600; }
-#c-checks input { margin-top: 6px; }
 
 /* --- Buttons: primary = touchstone, secondary = outline, link = text --------------------------------- */
 button {
@@ -296,7 +302,7 @@ button.link:hover { background: none; text-decoration-thickness: 2px; }
 /* --- Recovery phrase ----------------------------------------------------------------------------------- */
 .words {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr)); /* 3 columns of 4: how the paper copy is written */
     gap: var(--s2);
     padding: 0;
     margin: var(--s4) 0;
@@ -311,6 +317,31 @@ button.link:hover { background: none; text-decoration-thickness: 2px; }
     border-radius: 6px;
     font: 500 var(--t-md) var(--mono);
 }
+@media (max-width: 300px) { .words { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.words li { overflow-wrap: anywhere; }
+/* Phrase check: per position, one of three words (radio chips). */
+#c-checks fieldset { margin: var(--s3) 0; padding: 0; border: 0; }
+#c-checks legend { margin-bottom: var(--s2); font-weight: 600; font-size: var(--t-sm); }
+#c-checks fieldset { display: flex; flex-wrap: wrap; gap: var(--s2); }
+#c-checks legend { flex-basis: 100%; }
+label.word-choice {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s2);
+    margin: 0;
+    padding: var(--s2) var(--s4);
+    border: 1px solid var(--line-strong);
+    border-radius: 999px;
+    background: var(--surface);
+    font: 500 var(--t-md) var(--mono);
+    cursor: pointer;
+}
+label.word-choice:hover { border-color: var(--ink); }
+label.word-choice input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+label.word-choice:has(input:checked) { background: var(--action); color: var(--action-text); border-color: var(--action); }
+label.word-choice:has(input:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
+.address-row { flex-direction: column; align-items: flex-start; gap: var(--s1); }
+.address-row > :last-child { text-align: left; }
 .words li::before { content: counter(word); display: inline-block; min-width: 3ch; margin-right: var(--s1); color: var(--muted); font-size: var(--t-xs); }
 
 /* Sign-up progress: one hallmark per step; the current one is struck in gold. */
@@ -346,6 +377,151 @@ iframe {
 .copy-row { display: flex; gap: var(--s2); align-items: stretch; }
 .copy-row button { margin-top: 0; flex: none; }
 .copy-row > input, .copy-row > textarea, .copy-row > select { min-width: 0; }
+/* --- App components (Gem-style layout, our palette): grouped lists, round actions, top bars ---------- */
+svg.i { width: 22px; height: 22px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.mono { font-family: var(--mono); font-size: var(--t-sm); overflow-wrap: anywhere; }
+.center { text-align: center; }
+
+/* Top bar: back or a small action on the left, the title centred, a small action on the right. */
+.topbar { display: grid; grid-template-columns: 44px minmax(0, 1fr) 44px; align-items: center; gap: var(--s2); min-height: 56px; margin-bottom: var(--s2); }
+.topbar h2 { margin: 0; text-align: center; font-size: var(--t-lg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.topbar > .pill { justify-self: center; }
+.icon-btn, .icon-btn-space { width: 44px; height: 44px; }
+button.icon-btn {
+    margin: 0;
+    padding: 0;
+    border-radius: 999px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    color: var(--ink);
+}
+button.icon-btn:hover { background: var(--surface-2); border-color: var(--line-strong); }
+.pill {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s2);
+    max-width: 100%;
+    padding: var(--s1) var(--s3) var(--s1) var(--s2);
+    border-radius: 999px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    font-weight: 600;
+    font-size: var(--t-sm);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.pill .brand-mark { width: 18px; height: 18px; border-radius: 999px; }
+
+/* Grouped list: one rounded card of rows divided by hairlines. */
+.list { list-style: none; margin: 0 0 var(--s4); padding: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg); overflow: hidden; }
+.list > li + li { border-top: 1px solid var(--line); }
+.group-title { margin: var(--s5) var(--s4) var(--s2); color: var(--muted); font-size: var(--t-sm); font-weight: 600; letter-spacing: 0; }
+button.row {
+    display: flex;
+    width: 100%;
+    gap: var(--s3);
+    align-items: center;
+    justify-content: flex-start;
+    min-height: 60px;
+    margin: 0;
+    padding: var(--s3) var(--s4);
+    border: 0;
+    border-radius: 0;
+    background: none;
+    color: var(--ink);
+    font-weight: 400;
+    text-align: left;
+}
+button.row:hover { background: var(--surface-2); --mark-field: var(--surface-2); }
+button.row:active { transform: none; background: var(--surface-2); }
+button.row:focus-visible { outline-offset: -3px; }
+.row-static { display: flex; justify-content: space-between; align-items: center; gap: var(--s4); min-height: 52px; padding: var(--s3) var(--s4); }
+.row-static > :first-child { color: var(--muted); flex: none; }
+.row-static > :last-child { text-align: right; min-width: 0; overflow-wrap: anywhere; }
+.row-main { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.row-title { font-weight: 650; line-height: 1.3; overflow-wrap: anywhere; }
+.row-title .mark { margin-left: var(--s1); vertical-align: 1px; white-space: normal; } /* long network names wrap inside the row */
+.row-sub { color: var(--muted); font-size: var(--t-sm); line-height: 1.35; }
+.row-value { color: var(--muted); font-size: var(--t-sm); text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 45%; }
+.row-end { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; text-align: right; flex: none; max-width: 48%; }
+.row-end .amount { font-weight: 650; overflow-wrap: anywhere; }
+.row-end .amount.zero { color: var(--muted); font-weight: 500; }
+.chev { width: 18px; height: 18px; color: var(--line-strong); }
+.form-list > li { padding: var(--s2) var(--s4) var(--s3); }
+.form-list > li > label:first-child { margin-top: var(--s1); }
+.form-list > li.row-static { padding: var(--s3) var(--s4); }
+
+/* Round actions under the balance: Send, Receive, New payment, ... */
+.quick { display: flex; justify-content: center; gap: var(--s5); margin: var(--s5) 0; }
+button.act {
+    flex-direction: column;
+    gap: var(--s2);
+    min-width: 64px;
+    margin: 0;
+    padding: 0;
+    background: none;
+    border: 0;
+    color: var(--ink);
+    font-size: var(--t-sm);
+    font-weight: 600;
+}
+button.act:hover { background: none; }
+.act-icon { display: grid; place-items: center; width: 52px; height: 52px; border-radius: 999px; background: var(--action); color: var(--action-text); transition: background-color 160ms var(--ease), transform 160ms var(--ease); }
+button.act:hover .act-icon { background: var(--action-hover); transform: translateY(-1px); }
+button.act:focus-visible { outline: none; }
+button.act:focus-visible .act-icon { outline: 2px solid var(--focus); outline-offset: 3px; }
+
+/* Coin marks: the coin's logo (cryptocurrency-icons, CC0), or a disc coloured per coin when there's none; tokens carry a small chain badge. */
+.coin { position: relative; display: inline-grid; place-items: center; width: 40px; height: 40px; flex: none; border-radius: 999px; background: var(--coin, var(--stone)); color: var(--coin-ink, #fff); font-weight: 700; font-size: 1.1rem; }
+.coin-lg { width: 64px; height: 64px; font-size: 1.8rem; }
+.coin-badge { position: absolute; right: -3px; bottom: -3px; display: grid; place-items: center; width: 18px; height: 18px; border-radius: 999px; background: var(--coin, var(--stone)); color: var(--coin-ink, #fff); font-size: 0.62rem; box-shadow: 0 0 0 2px var(--surface); }
+.coin-lg .coin-badge { width: 24px; height: 24px; font-size: 0.8rem; }
+.coin > img, .coin-badge > img { display: block; width: 100%; height: 100%; border-radius: 999px; }
+[data-coin=BTC] { --coin: #f7931a; }
+[data-coin=ETH] { --coin: #627eea; }
+[data-coin=LTC] { --coin: #345d9d; }
+[data-coin=DOGE] { --coin: #c2a633; --coin-ink: #1b1a10; }
+[data-coin=BNB] { --coin: #f3ba2f; --coin-ink: #1b1a10; }
+[data-coin=TRX] { --coin: #d6102b; }
+[data-coin=USDT] { --coin: #26a17b; }
+[data-coin=TEST] { --coin: var(--line-strong); --coin-ink: var(--surface); }
+.coin-any { --coin: var(--surface-2); --coin-ink: var(--muted); border: 1px solid var(--line); }
+
+/* Segmented control (chart range, sample language) and filter chips. */
+.segmented { display: flex; gap: var(--s1); padding: var(--s1); margin: var(--s3) 0 0; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--line); }
+.segmented button { flex: 1; min-height: 36px; margin: 0; padding: var(--s1) var(--s2); border: 0; border-radius: 999px; background: none; color: var(--muted); font-size: var(--t-sm); }
+.segmented button:hover { background: var(--surface); color: var(--ink); }
+.segmented button[aria-pressed=true] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 3px rgba(16, 26, 22, 0.18); }
+.chips { display: flex; gap: var(--s2); overflow-x: auto; margin: var(--s3) 0 var(--s2); padding-bottom: var(--s1); scrollbar-width: none; }
+.chips::-webkit-scrollbar { display: none; }
+.chips button { flex: none; min-height: 36px; margin: 0; padding: var(--s1) var(--s4); border-radius: 999px; background: var(--surface); color: var(--ink); border: 1px solid var(--line); font-size: var(--t-sm); white-space: nowrap; }
+.chips button:hover { background: var(--surface-2); border-color: var(--line-strong); }
+.chips button[aria-pressed=true] { background: var(--action); color: var(--action-text); border-color: var(--action); }
+
+/* Big amount entry (Send, New payment). */
+.amount-entry { display: flex; align-items: baseline; justify-content: center; gap: var(--s2); margin: var(--s4) 0 0; }
+.amount-entry input {
+    width: auto;
+    min-width: 2ch;
+    max-width: 100%;
+    flex: 0 1 auto;
+    field-sizing: content; /* grows with the number (Chromium); elsewhere a fixed width */
+    padding: 0;
+    border: 0;
+    background: none;
+    font: 700 var(--t-display)/1.1 var(--sans);
+    letter-spacing: -0.02em;
+    text-align: center;
+}
+@supports not (field-sizing: content) { .amount-entry input { width: 7ch; } }
+.amount-entry input:focus-visible { box-shadow: none; border-bottom: 2px solid var(--focus); border-radius: 0; }
+.amount-entry .unit { color: var(--muted); font-size: var(--t-xl); font-weight: 600; }
+.amount-entry select { width: auto; flex: none; min-height: 36px; border-radius: 999px; font-weight: 600; }
+label.pill-check { display: inline-flex; align-items: center; gap: var(--s2); margin: var(--s2) 0 0; padding: var(--s1) var(--s3); border: 1px solid var(--line); border-radius: 999px; background: var(--surface); font-size: var(--t-sm); font-weight: 600; cursor: pointer; }
+label.pill-check input { margin: 0; width: 16px; height: 16px; }
+button.wide { width: 100%; min-height: 52px; border-radius: 999px; }
+
 .addresses dt { font-weight: 600; margin-top: var(--s3); }
 .addresses dd { margin: var(--s1) 0 0; font: var(--t-sm) var(--mono); overflow-wrap: anywhere; }
 [hidden] { display: none !important; }
@@ -365,7 +541,7 @@ iframe {
     <div id="c-confirm" hidden>
         <ol class="stepper" aria-label="Steps"><li class="mark done">1 Write it down</li><li class="mark" aria-current="step">2 Check</li><li class="mark">3 Password</li></ol>
         <h2>Confirm your phrase</h2>
-        <p>Type the words at these positions to check your backup.</p>
+        <p>Tap the right word for each position, from your written phrase.</p>
         <div id="c-checks"></div>
         <p class="error" id="c-error" role="alert"></p>
         <div class="actions">
@@ -423,17 +599,15 @@ iframe {
 <section id="confirm" hidden>
     <h2>Confirm sending</h2>
     <p>Check every detail. This window is offline and shows exactly what will be signed.</p>
-    <dl class="addresses">
-        <dt>Amount</dt><dd id="cf-amount"></dd>
-        <dt>To</dt><dd id="cf-to"></dd>
-        <dt>Network fee</dt><dd id="cf-fee"></dd>
-        <dt>Total leaving your wallet</dt><dd id="cf-total"></dd>
-    </dl>
+    <ul class="list">
+        <li class="row-static"><span>Amount</span><strong id="cf-amount"></strong></li>
+        <li class="row-static address-row"><span>To</span><span id="cf-to" class="mono"></span></li>
+        <li class="row-static"><span>Network fee</span><span id="cf-fee"></span></li>
+        <li class="row-static"><span>Total leaving your wallet</span><strong id="cf-total"></strong></li>
+    </ul>
     <p class="warning">Crypto sent to a wrong address can't be recovered, by anyone.</p>
-    <div class="actions">
-        <button type="button" id="cf-cancel" class="secondary">Cancel</button>
-        <button type="button" id="cf-ok">Confirm and send</button>
-    </div>
+    <button type="button" id="cf-ok" class="wide">Confirm and send</button>
+    <button type="button" id="cf-cancel" class="secondary wide">Cancel</button>
 </section>
 
 <section id="working" hidden>
@@ -4638,6 +4812,17 @@ var Mnemonic = function(language) {
         return picked.sort(function (a, b) { return a - b; });
     }
 
+    function shuffled(items) { // Fisher-Yates with crypto randomness
+        var out = items.slice(), buf = new Uint32Array(1);
+        for (var i = out.length - 1; i > 0; i--) {
+            crypto.getRandomValues(buf);
+            var j = buf[0] % (i + 1), t = out[i];
+            out[i] = out[j];
+            out[j] = t;
+        }
+        return out;
+    }
+
     // --- Create a new wallet --------------------------------------------------------------------
     var created = null;
 
@@ -4656,18 +4841,30 @@ var Mnemonic = function(language) {
     $id("c-ack").addEventListener("change", function () { $id("c-next").disabled = !this.checked; });
 
     $id("c-next").addEventListener("click", function () {
-        var box = $id("c-checks");
+        // Three positions; for each, tap the right word among three taken from the phrase itself.
+        var box = $id("c-checks"), words = created.split(" ");
         box.textContent = "";
         randomPositions(3, 12).forEach(function (pos) {
-            var label = document.createElement("label");
-            label.textContent = "Word #" + (pos + 1);
-            var input = document.createElement("input");
-            input.dataset.pos = pos;
-            input.autocomplete = "off";
-            input.spellcheck = false;
-            input.setAttribute("autocapitalize", "off");
-            label.appendChild(input);
-            box.appendChild(label);
+            var set = document.createElement("fieldset");
+            set.dataset.pos = pos;
+            var legend = document.createElement("legend");
+            legend.textContent = "Word #" + (pos + 1);
+            set.appendChild(legend);
+            var choices = [words[pos]];
+            shuffled(words).forEach(function (w) { // decoys from the same phrase, in random order
+                if (choices.length < 3 && choices.indexOf(w) < 0) choices.push(w);
+            });
+            shuffled(choices).forEach(function (w) {
+                var label = document.createElement("label");
+                label.className = "word-choice";
+                var input = document.createElement("input");
+                input.type = "radio";
+                input.name = "c-" + pos;
+                input.value = w;
+                label.append(input, w);
+                set.appendChild(label);
+            });
+            box.appendChild(set);
         });
         $id("c-error").textContent = "";
         $id("c-show").hidden = true;
@@ -4682,8 +4879,9 @@ var Mnemonic = function(language) {
 
     $id("c-done").addEventListener("click", function () {
         var words = created.split(" ");
-        var wrong = Array.prototype.some.call($id("c-checks").querySelectorAll("input"), function (input) {
-            return normalizePhrase(input.value) !== words[Number(input.dataset.pos)];
+        var wrong = Array.prototype.some.call($id("c-checks").querySelectorAll("fieldset"), function (set) {
+            var picked = set.querySelector("input:checked");
+            return !picked || picked.value !== words[Number(set.dataset.pos)];
         });
         if (wrong) {
             $id("c-error").textContent = "Those words don't match. Check your written phrase, or go back and look again.";

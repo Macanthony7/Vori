@@ -252,16 +252,23 @@ Dark mode redefines every token under `prefers-color-scheme: dark` (values in `.
 
 Every gap, padding and margin is a multiple of 4px, taken from the seven-step scale (`s1` to `s7`). The only exceptions are hairline borders and the mark's 1px vertical padding.
 
-- **Containers:** sign-up `main` is 640px wide (32px top padding, 16px sides, 48px bottom). The wallet canvas and shell are 1040px. Settings is capped at 720px, Integration at 860px and narrow forms at 560px. The checkout column is 480px.
-- **Wallet Overview:** two columns (fluid plus a 340px side column, 32px gap) that collapse to one column at 860px.
-- **Balances:** a list of whole rows (asset and network | amount | actions). At 560px and below, the actions wrap to their own full-width line, aligned right. Cells are never squeezed.
-- **Tables:** Payments and Deliveries restack at 560px into two-column grid rows (main text | status or amount, with details on line two). The header is visually hidden but still read by screen readers.
-- **Filters:** search plus a 200px select, stacking at 560px.
-- **Shell:** at 640px and below, the tab bar moves to its own full-width row as a four-column grid.
-- **Checkout:** stacks in order: shop band, amount, network mark, hallmark strip, status, QR card, address and amount copy rows, countdown, network warning, back link. At 380px, padding tightens to 12px sides and 16px card padding.
-- Touch targets are 44px minimum height (36px for compact buttons inside rows and in the shell).
+**Structure (from Gem Wallet's layout, our own code and palette).** The wallet is three tabs, **Wallet · Payments · Settings**, and each tab is a stack of screens: a list screen first, and detail screens pushed on top of it with a Back button in a top bar. Only one screen per tab shows at a time; tapping the open tab again returns to its first screen.
 
-**The Whole Rows Rule.** Rows that hold live entities (balances, payments, deliveries) repack as whole rows at every width. A status change restyles the row in place and never moves the grid.
+- **Phone (below 900px):** one 560px column, and the tabs float at the bottom as a touchstone pill (icon over label; the selected tab's icon is gold). The page keeps 120px of bottom padding so the pill never covers the last row.
+- **Desktop (900px and up):** the same tabs as a 240px touchstone sidebar (brand, tabs, Lock at the bottom) with a 720px content column. Lock in the wallet's top bar is hidden there.
+- **Top bar:** a three-column grid (44px | title | 44px): Back or a round icon button on the left, the centred title (or the wallet pill), a round icon button or an empty 44px slot on the right.
+- **Wallet home:** the total balance as the one headline (display size, in USD, testnets never counted), today's change under it (green up, red down), four round actions (Send, Receive, New payment, Find late), then every coin as one grouped list.
+- **Coin screen:** coin mark (64px), balance and its value, the actions, a chart card (line over a pale area, 1H/1D/1W/1M/1Y segmented control), a grouped list (Price, Network, Main address on its own line), then that coin's payments.
+- **Send / New payment:** a large centred amount entry with the unit beside it, a grouped form list, the note, and one wide pill button.
+- **Payments:** a pill search field, status chips, then grouped lists under day headings (Today, Yesterday, 12 Nov). A row opens the payment's detail screen.
+- **Settings:** grouped lists under section titles (Shop; Developer: API key, Webhooks, Connect your shop; Security). Rows open their screens.
+- **Sign-up:** a centred welcome (72px emblem, headline, promise, wide pill buttons: Create a new wallet, Import an existing wallet, and a quiet xpub link), then the secure frame.
+- **Checkout:** stacks in order: shop band, amount, network mark, hallmark strip, status, QR card, a grouped list (address, amount, time left), network warning, back link. At 380px, padding tightens to 12px sides and 16px card padding.
+- Touch targets are 44px minimum height (36px for chips and segmented buttons).
+
+**The Whole Rows Rule.** Rows that hold live entities (coins, payments, deliveries) repack as whole rows at every width. A status change restyles the row in place and never moves the list.
+
+**One layout for every platform.** The browser extension popup (360×600) and the phone app reuse the phone layout of the web wallet exactly: same screens, same tokens, same components. Platform differences stay in how keys are stored, never in how screens look ([docs/plan.md](docs/plan.md#7-gem-style-layout)).
 
 ## Elevation & Depth
 
@@ -278,7 +285,7 @@ Surfaces are mostly flat, with depth from tonal layering: the sterling ground, w
 
 ## Shapes
 
-The corners form a small ladder: hallmarks at 3px (crisp, punched), the focus ring at 4px, controls (buttons, inputs, selects, notices, recovery words, code samples) at 6px, and containers (cards, sheets, balances, tables, the shop band, empty states, the frame) at 8px. Borders are 1px hairlines. Hallmarks use a 1.5px rule doubled by the inset inner rule. Empty states use a 1px dashed `line-strong` border, and unstruck progress marks use a dashed rule. The brand emblem is a 22px rounded square of touchstone crossed by a diagonal gold stripe, drawn in CSS.
+The corners form a small ladder: hallmarks at 3px (crisp, punched), the focus ring at 4px, inputs, notices and recovery words at 6px, the frame at 8px, grouped lists and cards at 14px (`--radius-lg`), the checkout card at 20px, and everything you press in the app layout (primary buttons, round actions, icon buttons, chips, segmented controls, the tab bar, the shop band, search) fully round. Borders are 1px hairlines. Hallmarks use a 1.5px rule doubled by the inset inner rule. Empty states use a 1px dashed `line-strong` border, and unstruck progress marks use a dashed rule. The brand emblem is a 22px rounded square of touchstone crossed by a diagonal gold stripe, drawn in CSS.
 
 ## Components
 
@@ -315,11 +322,26 @@ Small struck cartouches that carry coin, network, status and sign-up step.
 - **Copy row:** a field and a non-shrinking Copy button 8px apart, used for every address, amount and key.
 
 ### Navigation
-- **Shell bar:** touchstone, 60px minimum height, a 1040px inner width, the brand emblem and title on the left, Lock pushed right.
-- **Tabs** (Overview / Payments / Settings / Integration): text-only and transparent at label weight 600 in `on-stone-muted`. Hover and selected use `on-stone`, and the selected tab carries a 3px gold underline drawn as an inset shadow. On phones, the tabs form a full-width four-column row.
+- **Tab bar / sidebar:** see Layout. Tabs are buttons in a `tablist` (arrow keys, Home and End move between them). Muted `on-stone-muted` labels; hover and selected sit on `stone-2` in `on-stone`; the selected icon is gold, the "you are here" use of gold.
+- **Top bar:** see Layout. Round 44px icon buttons on `surface` with a hairline.
 
-### Tables
-- Hairline-bordered 8px container on `surface`. Cells have 12px by 16px padding at label size. Headers are uppercase, muted and tracked on `surface-2`. Rows tint to `surface-2` on hover over 160ms. On phones they restack as described in Layout.
+### Grouped list (the main container)
+- One `surface` card, 14px corners, 1px `line` border, rows divided by hairlines. Section titles sit above in muted label size.
+- **Rows** are whole buttons (60px minimum, 68px for coins): leading mark, a main column (title at weight 650, muted sub line), an end column (amount, value or status), and a muted chevron. Hover and press tint the row `surface-2`.
+- **Static rows** (label | value) for read-only facts; long values such as addresses take their own line under the label.
+
+### Round actions
+- 52px `action` circles with a 22px stroke icon, label under in label size at weight 600. Hover lifts 1px; keyboard focus rings the circle.
+
+### Coin marks
+- The coin's logo at 40px (64px on the coin screen), from `frontend/public/coins/`: colour SVGs from the *cryptocurrency-icons* set v0.18.1 (CC0-1.0, no attribution needed). Tokens get the chain's logo as an 18px badge at the lower right; test networks get a grey "t" badge. A coin without a logo falls back to a disc in its colour with its sign (₿, Ξ, Ł, Ð, B, T, ₮). To add a coin, put `<asset>.svg` (lower case) in `coins/` and add it to `COIN_LOGO` in `wallet.js` and `pay.js`.
+
+### Chips and segmented controls
+- **Chips** (status filters): pill buttons on `surface`; the pressed one is `action`. They scroll sideways on narrow screens.
+- **Segmented** (chart range, code language): a pill track on `surface-2`; the pressed segment is `surface` with a small shadow.
+
+### Chart
+- One line in ink over a `surface-2` area, drawn as SVG from closing prices; the change over the range is coloured up or down; a shimmer while loading; "No price history right now." when the market source is down. Its text alternative states the range, first and last price, low and high.
 
 ### Notices and Empty States
 - **Notices:** warnings are `warning-text` on `wait-bg`, success is `ok` on `ok-bg` with an `ok` border, and checkout status is centered at weight 600 on `surface-2`, or toned good or bad. All use 12px by 16px padding and 6px corners.

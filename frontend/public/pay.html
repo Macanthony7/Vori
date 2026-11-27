@@ -53,20 +53,24 @@
         <div id="pay-box">
             <div id="qr" class="qr" aria-hidden="true"></div>
 
-            <label for="address">Address</label>
-            <div class="copy-row">
-                <!-- Wraps instead of scrolling, so the payer can check the whole address -->
-                <textarea id="address" rows="2" readonly spellcheck="false"></textarea>
-                <button type="button" data-copy="address">Copy</button>
-            </div>
-
-            <label for="amount-due">Amount</label>
-            <div class="copy-row">
-                <input id="amount-due" readonly>
-                <button type="button" data-copy="amount-due">Copy</button>
-            </div>
-
-            <p class="countdown">Time left: <strong id="countdown">--:--</strong></p>
+            <ul class="list pay-fields">
+                <li>
+                    <label for="address">Address</label>
+                    <div class="copy-row">
+                        <!-- Wraps instead of scrolling, so the payer can check the whole address -->
+                        <textarea id="address" rows="2" readonly spellcheck="false"></textarea>
+                        <button type="button" data-copy="address" class="secondary">Copy</button>
+                    </div>
+                </li>
+                <li>
+                    <label for="amount-due">Amount</label>
+                    <div class="copy-row">
+                        <input id="amount-due" readonly>
+                        <button type="button" data-copy="amount-due" class="secondary">Copy</button>
+                    </div>
+                </li>
+                <li class="row-static countdown"><span>Time left</span><strong id="countdown">--:--</strong></li>
+            </ul>
             <p id="network-warning" class="warning"></p>
         </div>
 

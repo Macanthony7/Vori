@@ -6,7 +6,7 @@ import httpx
 from playwright.sync_api import expect
 
 import decode
-from conftest import frame, import_wallet, unlock
+from conftest import frame, import_wallet, new_payment, open_coin, unlock
 
 # Account-0 main addresses (index 0) of the test phrase.
 BTC_MAIN = "1LqBGSKuX5yYUonjxT5qGfpUsXKYYWeabA"
@@ -20,8 +20,8 @@ TO_TRX = "TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf"
 
 def send(page, network, to, amount):
     """Open Send on the balance row for `network`, review, confirm in the frame. Returns the frame."""
-    row = page.locator("#balances li", has=page.locator(".network", has_text=re.compile(f"^{re.escape(network)}$")))
-    row.get_by_role("button", name=re.compile("^Send")).click()
+    open_coin(page, network)
+    page.click("#coin-send")
     page.fill("#send-to", to)
     page.fill("#send-amount", amount)
     page.click("#send-review")
@@ -86,10 +86,7 @@ def test_send_usdt_on_tron_with_gas_topup(page, server, chain, tick):
     import_wallet(page)
     unlock(page)
     # A paid USDT payment: its address holds the USDT but no TRX for fees.
-    page.fill("#charge-amount", "3")
-    page.select_option("#charge-network", "TRX/USDT")
-    page.click("#charge-create")
-    pid = page.locator("#charge-result a").get_attribute("href").split("/")[-1]
+    pid = new_payment(page, "3", "TRX/USDT")
     address = httpx.get(f"{server}/pay/{pid}/status").json()["address"]
     chain.pay("TRX", "USDT", address, 3_000_000)
     tick()
@@ -119,8 +116,8 @@ def test_frame_refuses_planted_address(page, chain):
         import_wallet(page)
         unlock(page)
         n = len(chain.relayed)
-        row = page.locator("#balances li", has=page.locator(".network", has_text=re.compile("^Ethereum$")))
-        row.get_by_role("button", name=re.compile("^Send")).click()
+        open_coin(page, "Ethereum")
+        page.click("#coin-send")
         page.fill("#send-to", TO_ETH)
         page.fill("#send-amount", "0.1")
         page.click("#send-review")

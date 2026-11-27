@@ -29,7 +29,7 @@
     <div id="c-confirm" hidden>
         <ol class="stepper" aria-label="Steps"><li class="mark done">1 Write it down</li><li class="mark" aria-current="step">2 Check</li><li class="mark">3 Password</li></ol>
         <h2>Confirm your phrase</h2>
-        <p>Type the words at these positions to check your backup.</p>
+        <p>Tap the right word for each position, from your written phrase.</p>
         <div id="c-checks"></div>
         <p class="error" id="c-error" role="alert"></p>
         <div class="actions">
@@ -87,17 +87,15 @@
 <section id="confirm" hidden>
     <h2>Confirm sending</h2>
     <p>Check every detail. This window is offline and shows exactly what will be signed.</p>
-    <dl class="addresses">
-        <dt>Amount</dt><dd id="cf-amount"></dd>
-        <dt>To</dt><dd id="cf-to"></dd>
-        <dt>Network fee</dt><dd id="cf-fee"></dd>
-        <dt>Total leaving your wallet</dt><dd id="cf-total"></dd>
-    </dl>
+    <ul class="list">
+        <li class="row-static"><span>Amount</span><strong id="cf-amount"></strong></li>
+        <li class="row-static address-row"><span>To</span><span id="cf-to" class="mono"></span></li>
+        <li class="row-static"><span>Network fee</span><span id="cf-fee"></span></li>
+        <li class="row-static"><span>Total leaving your wallet</span><strong id="cf-total"></strong></li>
+    </ul>
     <p class="warning">Crypto sent to a wrong address can't be recovered, by anyone.</p>
-    <div class="actions">
-        <button type="button" id="cf-cancel" class="secondary">Cancel</button>
-        <button type="button" id="cf-ok">Confirm and send</button>
-    </div>
+    <button type="button" id="cf-ok" class="wide">Confirm and send</button>
+    <button type="button" id="cf-cancel" class="secondary wide">Cancel</button>
 </section>
 
 <section id="working" hidden>

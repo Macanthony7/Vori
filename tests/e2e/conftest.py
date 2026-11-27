@@ -146,9 +146,65 @@ def set_password(f, password=PASSWORD):
 
 
 def tab(pg, name):
-    """Open a wallet section: overview, payments, settings or integration."""
+    """Open a wallet tab (wallet, payments or settings) at its first screen."""
     pg.click(f"#tab-{name}")
     pg.wait_for_selector(f"#panel-{name}:not([hidden])")
+    if pg.get_attribute(f"#tab-{name}", "aria-selected") == "true" and pg.is_hidden(
+            f"#panel-{name} > .screen:first-child"):
+        pg.click(f"#tab-{name}")  # tapping the open tab again goes back to its start
+    pg.wait_for_selector(f"#panel-{name} > .screen:first-child:not([hidden])")
+
+
+def screen(pg, name):
+    """Open a Settings screen: shop-settings, api-key-card, webhooks or integration."""
+    tab(pg, "settings")
+    pg.click(f"[data-open={name}]")
+    pg.wait_for_selector(f"#{name}:not([hidden])")
+
+
+def open_coin(pg, network):
+    """Open the coin screen for the balance row whose network is exactly `network` (e.g. "Bitcoin")."""
+    import re
+    tab(pg, "wallet")
+    pg.locator("#balances li", has=pg.locator(".network", has_text=re.compile(f"^{re.escape(network)}$"))).click()
+    pg.wait_for_selector("#coin:not([hidden])")
+
+
+def new_payment(pg, amount, network):
+    """New payment in the wallet for `amount` of "CHAIN/ASSET" (or a "USD"/"EUR" price). Returns its id."""
+    tab(pg, "wallet")
+    pg.click("#act-charge")
+    link = pg.locator("#charge-result a")
+    before = link.get_attribute("href") if link.count() and link.is_visible() else None
+    pg.fill("#charge-amount", amount)
+    if network in ("USD", "EUR"):
+        pg.select_option("#charge-unit", network)
+    else:
+        pg.select_option("#charge-unit", "coin")
+        pg.select_option("#charge-network", network)
+    pg.click("#charge-create")
+    if before:
+        from playwright.sync_api import expect
+        expect(link).not_to_have_attribute("href", before)
+    link.wait_for()
+    return link.get_attribute("href").split("/")[-1]
+
+
+MARKET = {"BTC": ("60000", "0.0125"), "ETH": ("1700", "-0.021"), "LTC": ("44", "0.003"), "DOGE": ("0.057", None),
+          "BNB": ("550", "0.01"), "TRX": ("0.30", "-0.004"), "USDT": ("1", "0")}
+
+
+@pytest.fixture(autouse=True)
+def fake_market(monkeypatch):
+    """Fixed prices, 24 h changes and chart lines: the wallet's market data never reaches the internet in tests."""
+    import math
+    from decimal import Decimal
+    import rates
+    monkeypatch.setattr(rates, "market", lambda currency="USD": {
+        c: {"price": Decimal(p), "change_24h": None if ch is None else Decimal(ch)} for c, (p, ch) in MARKET.items()})
+    monkeypatch.setattr(rates, "history", lambda coin, span, currency="USD": [
+        (1_700_000_000 + i * 900, Decimal(MARKET[coin][0]) * (1 + Decimal(str(round(0.03 * math.sin(i / 5) + 0.0006 * i, 6)))))
+        for i in range(48)])
 
 
 def unlock(pg, password=PASSWORD):

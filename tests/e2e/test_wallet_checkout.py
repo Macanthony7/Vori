@@ -5,21 +5,12 @@ import json
 import httpx
 from playwright.sync_api import expect
 
-from conftest import PASSWORD, frame, import_wallet, tab, unlock
+from conftest import PASSWORD, frame, import_wallet, new_payment, open_coin, screen, tab, unlock
 
 
 def open_wallet(page):
     import_wallet(page)  # first run creates the account; later runs restore it (same phrase)
     unlock(page)
-
-
-def new_payment(page, amount, network):
-    page.fill("#charge-amount", amount)
-    page.select_option("#charge-network", network)
-    page.click("#charge-create")
-    link = page.locator("#charge-result a")
-    link.wait_for()
-    return link.get_attribute("href").split("/")[-1]
 
 
 def status_text(checkout):
@@ -30,7 +21,8 @@ def test_unlock_balances_receive_and_lock(page, chain):
     open_wallet(page)
     balances = page.locator("#balances li")
     assert balances.count() >= 5, "one row per coin and network"
-    page.locator("#balances button[aria-label^='Receive'][aria-label$=' Bitcoin']").click()
+    open_coin(page, "Bitcoin")
+    page.click("#coin-receive")
     address = page.input_value("#receive-address")
     assert address == "1LqBGSKuX5yYUonjxT5qGfpUsXKYYWeabA", "Receive shows the main address (index 0)"
     assert page.locator("#receive-qr canvas").count() == 1
@@ -84,10 +76,12 @@ def test_payment_from_checkout_to_paid(page, browser, server, chain, tick):
     page.reload()
     unlock(page)
     tab(page, "payments")
-    row = page.locator("#payments tbody tr").first
+    row = page.locator(f'#payments li[data-id="{pid}"]')
     assert "Confirmed" in row.inner_text()
-    assert row.locator("a", has_text="View").get_attribute("href").endswith("/bitcoin/address/" + address), \
+    row.click()
+    assert page.get_attribute("#pd-explorer", "href").endswith("/bitcoin/address/" + address), \
         "two transactions: the address page lists both"
+    assert page.get_attribute("#pd-checkout", "href") == f"/pay/{pid}"
 
 
 def test_expired_payment_then_late_coins(page, chain, tick):
@@ -100,17 +94,18 @@ def test_expired_payment_then_late_coins(page, chain, tick):
         address = conn.execute("SELECT address FROM payments WHERE id = ?", (pid,)).fetchone()["address"]
     tick()  # nothing arrived: expired
     chain.pay("TRX", "TRX", address, 5_000_000, tx="cc" * 32)
+    tab(page, "wallet")
     page.click("#scan")  # far past the 24 h watch: only the scan finds it
     expect(page.locator("#scan-result")).to_contain_text("Found coins on 1")
     tab(page, "payments")
-    row = page.locator("#payments tbody tr", has_text="5 TRX").first
+    row = page.locator(f'#payments li[data-id="{pid}"]')
     row.wait_for()
     assert "Expired, 5 received" in row.inner_text()
 
 
 def test_api_key_rotation_hint_and_settings_protection(page, server, chain, tick):
     open_wallet(page)
-    tab(page, "settings")
+    screen(page, "api-key-card")
     expect(page.locator("#key-info")).to_contain_text("Your current key starts with gw_")
     page.click("#new-key")
     page.click("#new-key")  # second click confirms
@@ -141,7 +136,7 @@ def test_api_key_rotation_hint_and_settings_protection(page, server, chain, tick
 
     page.reload()
     unlock(page)
-    tab(page, "settings")
+    screen(page, "api-key-card")
     expect(page.locator("#key-info")).not_to_contain_text("not yet")  # the shop's key was used just now
 
 

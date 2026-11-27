@@ -18,6 +18,8 @@ def fixed_rates(monkeypatch):
 def test_payer_picks_the_coin_then_pays(page, browser, server, chain, tick, fixed_rates):
     import_wallet(page)
     unlock(page)
+    tab(page, "wallet")
+    page.click("#act-charge")
     page.select_option("#charge-unit", "USD")
     expect(page.locator("#charge-network-box")).to_be_hidden()
     page.fill("#charge-amount", "25")
@@ -26,7 +28,7 @@ def test_payer_picks_the_coin_then_pays(page, browser, server, chain, tick, fixe
     expect(page.locator("#charge-result")).to_contain_text("25.00 USD, the payer picks the coin")
     pid = link.get_attribute("href").split("/")[-1]
     tab(page, "payments")
-    row = page.locator(f'#payments tbody tr:has(a[href="/pay/{pid}"])')  # this payment's row (others may exist)
+    row = page.locator(f'#payments li[data-id="{pid}"]')  # this payment's row (others may exist)
     expect(row).to_contain_text("Choosing a coin")
 
     for viewport in ({"width": 375, "height": 812}, {"width": 1280, "height": 900}):
@@ -59,6 +61,6 @@ def test_payer_picks_the_coin_then_pays(page, browser, server, chain, tick, fixe
     page.reload()
     unlock(page)
     tab(page, "payments")
-    row = page.locator("#payments tbody tr", has_text="83.333334 TRX")
-    expect(row).to_contain_text("= 25.00 USD")
+    row = page.locator("#payments li", has_text="83.333334 TRX")
+    expect(row).to_contain_text("25.00 USD")
     expect(row).to_contain_text("Confirmed")

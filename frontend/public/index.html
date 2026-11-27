@@ -16,29 +16,17 @@
     </div>
 </header>
 <main>
-    <header>
+    <section id="choose" class="welcome">
+        <span class="brand-mark welcome-mark" aria-hidden="true"></span>
         <h1>Accept crypto payments</h1>
-        <p class="lede">No email, no personal details, no custody. Payments go straight to your own wallet.</p>
-    </header>
-
-    <section id="choose">
+        <p class="lede">A wallet that's yours alone. No email, no personal details, no custody: payments go straight to your own addresses.</p>
         <p id="existing" class="warning" hidden>A wallet is already saved on this device. <a href="wallet.html">Open your wallet</a>. Creating or importing another one here replaces it on this device, so make sure you have its recovery phrase.</p>
-        <h2>Set up your account</h2>
         <div class="options">
-            <button type="button" class="option" data-mode="create">
-                <strong>Create a new wallet</strong>
-                <span>We generate a 12-word recovery phrase on this device. Best if you're starting fresh.</span>
-            </button>
-            <button type="button" class="option" data-mode="import">
-                <strong>I have a recovery phrase</strong>
-                <span>Use an existing wallet, such as Trust Wallet or MetaMask.</span>
-            </button>
-            <a class="option" href="xpub.html">
-                <strong>Use xpub keys</strong>
-                <span>Paste extended public keys from a hardware wallet, Electrum or Sparrow. No phrase needed.</span>
-            </a>
+            <button type="button" class="option option-main" data-mode="create">Create a new wallet</button>
+            <button type="button" class="option" data-mode="import">Import an existing wallet</button>
+            <a class="option option-quiet" href="xpub.html">Use xpub keys instead (hardware wallet, Electrum, Sparrow)</a>
         </div>
-        <p class="note">Your recovery phrase is handled in an isolated frame that cannot connect to the internet. Only public keys (xpubs), which can receive but never spend, are sent to our server.</p>
+        <p class="note">Your recovery phrase is handled in an isolated window that cannot connect to the internet. Only public keys, which can receive but never spend, reach our server.</p>
     </section>
 
     <section id="wallet" hidden>

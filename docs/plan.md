@@ -15,6 +15,7 @@ Nothing counts as done until `python run_tests.py` passes and its docs are updat
 | 4 | Customer picks the coin; prices in USD/EUR | Large | ✅ |
 | 5 | UI/UX redesign: sign-up, wallet, checkout | Large | ✅ |
 | 6 | Launch prep: BlockCypher hooks, smaller signing engine, deploy, mainnet test | Medium | 🔄 (code done; deploy and mainnet test are yours) |
+| 7 | Gem-style layout (wallet, sign-up, checkout); extension and phone app plan | Large | ✅ |
 
 Decisions still open are marked **Decide:** and get settled before the item starts.
 
@@ -194,3 +195,42 @@ and a one-time check of the hooks on staging with a real BlockCypher token.
   hooks stop.
 - E2E: Send still works with the smaller engine (the decode checks catch any signing change).
 - Manual: the mainnet test checklist in deploy.md, results recorded in the README status table.
+
+## 7. Gem-style layout ✅
+
+**Asked:** keep the colours of item 5, take the layout and features of [Gem Wallet](https://github.com/gemwalletcom/wallet)
+(an open-source phone wallet), no code from it (it's GPL; we read its App Store screenshots for structure
+only, and use none of its assets, icons or logo).
+
+**Built:**
+- **Wallet in three tabs**, Wallet · Payments · Settings, each a stack of screens with Back. Phone: a
+  floating tab bar; desktop: a sidebar. Integration moved into Settings → Developer.
+- **Wallet home:** total balance in USD with today's change, round actions (Send, Receive, New payment,
+  Find late), every coin as a row with price and 24 h change, balance and value.
+- **Coin screen:** balance, actions, price chart (1H/1D/1W/1M/1Y), price, network, main address, the coin's payments.
+- **Payments** grouped by day with search and status chips; a **payment detail** screen.
+- **Send** with a large amount entry and its value in USD; **New payment** as its own screen.
+- **Sign-up:** a welcome screen with two wide buttons; the phrase in a numbered 3-column grid; the check is
+  now "tap the right word" for three positions (three words each, all from the phrase), instead of typing.
+- **Checkout** in the same language: grouped list for address, amount and time left; coin marks on the choices.
+- **Market data** for display: new `GET /market` and `GET /market/{coin}/history` ([api.md](api.md#market-data)),
+  Kraken's public candles, cached; never used to price a payment.
+- Coin logos from the *cryptocurrency-icons* set (CC0) in `frontend/public/coins/`, with a coloured
+  disc and the coin's sign as the fallback.
+
+**Tests:** every E2E test drives the new screens (helpers `tab`, `screen`, `open_coin`, `new_payment` in
+`tests/e2e/conftest.py`); market data is faked in the E2E tests so they never reach the internet; new
+`backend/test_market.py` and a history/24 h change test in `backend/test_rates.py`; the 320/375 px checks
+now cover every Settings screen, the coin screen and the tab bar; checkout goldens re-recorded.
+
+### Extension and phone app (decided now, built later)
+- **One design system for all three.** The extension popup (360×600) and the phone app use the web
+  wallet's phone layout exactly: same screens, tokens and components ([DESIGN.md](../DESIGN.md#layout)).
+- **Browser extension:** the same pages as a Manifest V3 extension. The phrase frame becomes the
+  extension's sandboxed page (`"sandbox"` in the manifest), so it stays offline and isolated as today;
+  the popup is the phone layout.
+- **Phone app:** first make the web wallet installable (PWA: manifest and icons, no offline payments).
+  A store app later wraps the same code; the vault moves to the phone's secure storage (Keychain /
+  Android Keystore), unlocked with Face ID or fingerprint.
+- Not started: each needs its own plan item with tests when it's next.
+

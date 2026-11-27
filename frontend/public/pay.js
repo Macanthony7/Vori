@@ -22,6 +22,8 @@
     // is the bare address: payment URIs there are read inconsistently and could send the wrong token.
     var URI_SCHEME = { BTC: "bitcoin", LTC: "litecoin", DOGE: "dogecoin" };
     var POLL_MS = 5000;
+    var COIN_GLYPH = { BTC: "₿", LTC: "Ł", DOGE: "Ð", ETH: "Ξ", BNB: "B", TRX: "T", USDT: "₮" }; // fallback when there's no logo
+    var COIN_LOGO = { BTC: 1, LTC: 1, DOGE: 1, ETH: 1, BNB: 1, TRX: 1, USDT: 1 }; // same logos as the wallet
 
     var $ = function (id) { return document.getElementById(id); };
     var id = decodeURIComponent(location.pathname.split("/")[2] || "");
@@ -77,16 +79,32 @@
             p.options.forEach(function (o) {
                 var b = document.createElement("button");
                 b.type = "button";
-                b.className = "secondary";
+                b.className = "row";
                 b.disabled = !o.available;
+                var coin = document.createElement("span");
+                coin.className = "coin";
+                coin.dataset.coin = o.asset;
+                if (COIN_LOGO[o.asset]) {
+                    var logo = document.createElement("img");
+                    logo.src = "/coins/" + o.asset.toLowerCase() + ".svg";
+                    logo.alt = "";
+                    coin.appendChild(logo);
+                } else {
+                    coin.textContent = COIN_GLYPH[o.asset] || o.asset.charAt(0);
+                }
                 var name = document.createElement("span");
+                name.className = "row-main";
                 var net = document.createElement("span");
                 net.className = "mark";
                 net.textContent = NETWORKS[o.chain + "/" + o.asset] || o.chain;
-                name.append(o.asset + " on ", net);
+                var title = document.createElement("span");
+                title.className = "row-title";
+                title.append(o.asset + " on ", net);
+                name.appendChild(title);
                 var amount = document.createElement("span");
+                amount.className = "row-end";
                 amount.textContent = o.available ? o.amount + " " + o.asset : "price unavailable";
-                b.append(name, amount);
+                b.append(coin, name, amount);
                 b.addEventListener("click", function () { choose(o); });
                 $("options").appendChild(b);
             });

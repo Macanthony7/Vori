@@ -7,6 +7,7 @@ USDT counts as exactly 1 USD.
 """
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from decimal import ROUND_UP, Decimal
 
 import requests
@@ -81,6 +82,53 @@ def current(currency):
         if prices:
             _cache[currency] = (time.monotonic(), prices)  # failures aren't cached: retry next time
         return prices
+
+
+# --- Market data for the wallet's display: price history and 24 h change ------------------------------
+# Display only, never used to price a payment, so one source (Kraken's public candles) is enough.
+SPANS = {"1H": (1, 60), "1D": (15, 96), "1W": (60, 168), "1M": (240, 180), "1Y": (1440, 365)}  # span: (minutes per candle, candles)
+HISTORY_TTL = {"1H": 60}  # seconds; other spans 300
+_history = {}  # (coin, span, currency) -> (fetched_at, [(unix time, Decimal close)])
+
+
+def kraken_candles(coin, minutes, currency):
+    data = requests.get("https://api.kraken.com/0/public/OHLC", params={"pair": KRAKEN[currency][coin], "interval": minutes},
+                        headers=HEADERS, timeout=TIMEOUT).json()
+    if data.get("error"):
+        raise ValueError(f"kraken: {data['error']}")
+    candles = next(v for k, v in data["result"].items() if k != "last")
+    return [(int(c[0]), Decimal(c[4])) for c in candles]
+
+
+def history(coin, span, currency="USD"):
+    """[(unix time, close)] for the span, oldest first; [] if Kraken can't be reached (not cached)."""
+    key = (coin, span, currency)
+    hit = _history.get(key)
+    if hit and time.monotonic() - hit[0] < HISTORY_TTL.get(span, 300):
+        return hit[1]
+    minutes, count = SPANS[span]
+    try:
+        points = kraken_candles(coin, minutes, currency)[-count:]
+    except (requests.RequestException, ValueError, KeyError, TypeError, IndexError, StopIteration, ArithmeticError):
+        return []
+    _history[key] = (time.monotonic(), points)
+    return points
+
+
+def market(currency="USD"):
+    """{coin: {"price": Decimal or None, "change_24h": Decimal fraction or None}} for every coin."""
+    prices = current(currency)
+    with ThreadPoolExecutor(max_workers=len(COINS)) as pool:  # cold cache: 7 requests at once, not in a row
+        days = dict(zip(COINS, pool.map(lambda c: history(c, "1D", currency), COINS)))
+    out = {}
+    for coin in COINS:
+        day = days[coin]
+        price = prices.get(coin)
+        change = None
+        if price and day and day[0][1] > 0:
+            change = ((price - day[0][1]) / day[0][1]).quantize(Decimal("1e-4"))
+        out[coin] = {"price": price, "change_24h": change}
+    return out
 
 
 def convert(price, currency, asset, decimals):

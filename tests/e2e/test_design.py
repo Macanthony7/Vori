@@ -14,7 +14,7 @@ from PIL import Image, ImageChops
 from playwright.sync_api import expect
 
 import rates
-from conftest import PASSWORD, frame, import_wallet, set_password, tab, unlock
+from conftest import PASSWORD, frame, import_wallet, new_payment, screen, set_password, tab, unlock
 
 GOLDENS = Path(__file__).parent / "goldens"
 MAX_DIFF = 0.004  # share of pixels allowed to differ (anti-aliasing noise), above it the look changed
@@ -22,18 +22,6 @@ MAX_DIFF = 0.004  # share of pixels allowed to differ (anti-aliasing noise), abo
 
 def no_sideways_scroll(pg):
     return pg.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
-
-
-def new_payment(page, amount, network):
-    tab(page, "overview")
-    link = page.locator("#charge-result a")
-    before = link.get_attribute("href") if link.count() else None  # the previous payment's link, if any
-    page.fill("#charge-amount", amount)
-    page.select_option("#charge-network", network)
-    page.click("#charge-create")
-    if before:
-        expect(link).not_to_have_attribute("href", before)
-    return link.get_attribute("href").split("/")[-1]
 
 
 def compare(shot, name, browser):
@@ -56,16 +44,24 @@ def compare(shot, name, browser):
 def test_wallet_tabs_work_by_keyboard(page):
     import_wallet(page)
     unlock(page)
-    page.focus("#tab-overview")
+    page.focus("#tab-wallet")
     page.keyboard.press("ArrowRight")
     expect(page.locator("#panel-payments")).to_be_visible()
     expect(page.locator("#tab-payments")).to_be_focused()
     page.keyboard.press("End")
-    expect(page.locator("#panel-integration")).to_be_visible()
+    expect(page.locator("#panel-settings")).to_be_visible()
     page.keyboard.press("ArrowRight")  # wraps around
-    expect(page.locator("#panel-overview")).to_be_visible()
-    assert page.get_attribute("#tab-overview", "aria-selected") == "true"
+    expect(page.locator("#panel-wallet")).to_be_visible()
+    assert page.get_attribute("#tab-wallet", "aria-selected") == "true"
     assert page.locator("#panel-settings").is_hidden()
+    # A settings row opens its screen by keyboard; Back returns to the list.
+    tab(page, "settings")
+    page.focus("[data-open=webhooks]")
+    page.keyboard.press("Enter")
+    expect(page.locator("#webhooks")).to_be_visible()
+    page.locator("#webhooks [data-back]").focus()
+    page.keyboard.press("Enter")
+    expect(page.locator("#settings-home")).to_be_visible()
 
 
 def test_payments_search_filter_and_empty_states(page, chain, tick):
@@ -82,14 +78,14 @@ def test_payments_search_filter_and_empty_states(page, chain, tick):
     page.reload()
     unlock(page)
     tab(page, "payments")
-    rows = page.locator("#payments tbody tr")
+    rows = page.locator("#payments li")
     expect(rows.first).to_be_visible()
     page.fill("#pay-search", btc[-10:].lower())  # part of the id, any case
     expect(rows).to_have_count(1)
     expect(rows.first).to_contain_text("0.002 BTC")
     page.fill("#pay-search", "")
-    page.select_option("#pay-filter", "confirmed")
-    expect(page.locator("#payments tbody tr", has_text="7 TRX")).to_have_count(1)
+    page.click("#pay-filter [data-status=confirmed]")
+    expect(page.locator("#payments li", has_text="7 TRX")).to_have_count(1)
     assert all("Confirmed" in t for t in rows.all_inner_texts())
     page.fill("#pay-search", "no-such-payment-anywhere")
     expect(page.locator("#payments-nomatch")).to_be_visible()
@@ -115,12 +111,18 @@ def test_sign_up_by_keyboard_only(page):
     page.keyboard.press("Space")
     page.keyboard.press("Tab")
     page.keyboard.press("Enter")  # Continue
-    checks = f.locator("#c-checks input")
-    expect(checks.first).to_be_focused()
-    for i in range(3):
+    checks = f.locator("#c-checks fieldset")
+    expect(checks.first.locator("input").first).to_be_focused()
+    for i in range(3):  # each position is a radio group: arrows move to the right word, Tab to the next group
         word = words[int(checks.nth(i).get_attribute("data-pos"))].split()[-1]
-        page.keyboard.type(word)
-        page.keyboard.press("Tab")
+        options = checks.nth(i).locator("label").all_inner_texts()
+        if i:
+            page.keyboard.press("Tab")
+        page.keyboard.press("Space")  # select the focused (first) choice
+        for _ in range(options.index(word)):
+            page.keyboard.press("ArrowRight")
+        expect(checks.nth(i).locator("input:checked")).to_have_value(word)
+    page.keyboard.press("Tab")
     page.keyboard.press("Tab")  # past "Show phrase again" to Continue
     page.keyboard.press("Enter")
     expect(f.locator("#p-new")).to_be_focused()
@@ -157,9 +159,18 @@ def test_narrow_screens(browser, server, page, width, fixed_rates):
         phone.goto("/")  # the wallet on a phone, after setting it up there
         import_wallet(phone)
         unlock(phone)
-        for section in ("overview", "payments", "settings", "integration"):
+        for section in ("wallet", "payments", "settings"):
             tab(phone, section)
             assert no_sideways_scroll(phone), f"wallet {section} scrolls sideways at {width}px"
+        for name in ("shop-settings", "webhooks", "api-key-card", "integration"):
+            screen(phone, name)
+            assert no_sideways_scroll(phone), f"settings {name} scrolls sideways at {width}px"
+        phone.click("#tab-wallet")
+        phone.locator("#balances li").first.click()  # a coin screen with its chart
+        phone.wait_for_selector("#chart svg")
+        assert no_sideways_scroll(phone), f"coin screen scrolls sideways at {width}px"
+        bar = phone.locator("#tabs").bounding_box()
+        assert bar["x"] >= 0 and bar["x"] + bar["width"] <= width, "the tab bar fits"
     finally:
         phone.context.close()
 
@@ -173,19 +184,12 @@ def fixed_rates(monkeypatch):
 def test_checkout_states_look_as_approved(page, browser, server, chain, tick, fixed_rates):
     import_wallet(page)
     unlock(page)
-    tab(page, "settings")
+    screen(page, "shop-settings")
     page.fill("#shop-name", "Corner Coffee")
     page.click("#shop-save")
     expect(page.locator("#shop-result")).to_contain_text("Saved")
     pid = new_payment(page, "10.5", "TRX/USDT")
-    tab(page, "overview")
-    link = page.locator("#charge-result a")
-    before = link.get_attribute("href")
-    page.select_option("#charge-unit", "USD")
-    page.fill("#charge-amount", "25")
-    page.click("#charge-create")
-    expect(link).not_to_have_attribute("href", before)
-    priced = link.get_attribute("href").split("/")[-1]
+    priced = new_payment(page, "25", "USD")
 
     import db
     from contextlib import closing
