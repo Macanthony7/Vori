@@ -23,12 +23,23 @@ export function networkName(chain: string, asset: string): string {
 const COIN_GLYPH: Record<string, string> = { BTC: "₿", LTC: "Ł", DOGE: "Ð", ETH: "Ξ", BNB: "B", TRX: "T", USDT: "₮" };
 const COIN_LOGO = new Set(["BTC", "LTC", "DOGE", "ETH", "BNB", "TRX", "USDT"]);
 
-export function CoinIcon({ asset }: { asset: string }) {
+export const TESTNETS: Record<string, boolean> = { SEPOLIA: true, NILE: true }; // no real value
+const NATIVE: Record<string, string> = { BTC: "BTC", LTC: "LTC", DOGE: "DOGE", ETH: "ETH", BSC: "BNB", TRX: "TRX", SEPOLIA: "ETH", NILE: "TRX" };
+
+function Mark({ asset }: { asset: string }) {
+  return COIN_LOGO.has(asset) ? <img src={`/coins/${asset.toLowerCase()}.svg`} alt="" /> : <>{COIN_GLYPH[asset] || asset.charAt(0)}</>;
+}
+
+// The coin's logo. With `chain`, tokens and test networks get a small chain badge.
+export function CoinIcon({ asset, chain, large, id }: { asset: string; chain?: string; large?: boolean; id?: string }) {
+  const native = chain && NATIVE[chain];
+  const badge = chain && (native !== asset || TESTNETS[chain]);
   return (
-    <span className="coin" data-coin={asset}>
-      {COIN_LOGO.has(asset)
-        ? <img src={`/coins/${asset.toLowerCase()}.svg`} alt="" />
-        : COIN_GLYPH[asset] || asset.charAt(0)}
+    <span id={id} className={large ? "coin coin-lg" : "coin"} data-coin={asset}>
+      <Mark asset={asset} />
+      {badge && (TESTNETS[chain]
+        ? <span className="coin-badge" data-coin="TEST">t</span>
+        : <span className="coin-badge" data-coin={native || undefined}>{native ? <Mark asset={native} /> : chain.charAt(0)}</span>)}
     </span>
   );
 }

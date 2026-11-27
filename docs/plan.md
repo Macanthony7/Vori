@@ -16,7 +16,7 @@ Nothing counts as done until `python run_tests.py` passes and its docs are updat
 | 5 | UI/UX redesign: sign-up, wallet, checkout | Large | ✅ |
 | 6 | Launch prep: BlockCypher hooks, smaller signing engine, deploy, mainnet test | Medium | 🔄 (code done; deploy and mainnet test are yours) |
 | 7 | Gem-style layout (wallet, sign-up, checkout); extension and phone app plan | Large | ✅ |
-| 8 | React rebuild (Vite + TypeScript): checkout, sign-up, wallet | Large | 🔄 (checkout and sign-up done) |
+| 8 | React rebuild (Vite + TypeScript): checkout, sign-up, wallet | Large | ✅ |
 
 Decisions still open are marked **Decide:** and get settled before the item starts.
 
@@ -237,7 +237,7 @@ now cover every Settings screen, the coin screen and the tab bar; checkout golde
 
 ---
 
-## 8. React rebuild 🔄
+## 8. React rebuild ✅
 
 The same design and behaviour, rebuilt as React components in TypeScript, one page at a time, each
 with the whole test suite passing.
@@ -261,5 +261,8 @@ with the whole test suite passing.
    checkout E2E tests and goldens pass unchanged.
 2. ✅ **Sign-up** (`index.html`, `xpub.html`, `src/signup/`): welcome, create/import around the frame,
    xpub-only; served at `/` and `/xpub.html`. `app.js` is gone.
-3. ⬜ **Wallet**: tabs, coin screen, chart, send, receive, payments, settings.
-4. ⬜ Remove the old `wallet.html`/`wallet.js`/`wallet.css`; update the docs.
+3. ✅ **Wallet** (`wallet.html`, `src/wallet/`): vault, frame, sign-in, tabs, coin screen, chart, send,
+   receive, new payment, payments, settings; served at `/wallet.html`. Built next to the old page and
+   switched over once every test passed.
+4. ✅ Old `wallet.html`, `wallet.js` and `wallet.css` removed; `frontend/public/` now holds only shared
+   files (styles, coin logos, vendored scripts, samples, the frame build). Docs updated.

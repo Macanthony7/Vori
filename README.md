@@ -18,12 +18,12 @@ deploy/       Caddyfile and systemd units for a VPS (docs/deploy.md)
 
 ```
 frontend/
-  public/           served as-is: wallet.html, wallet.js, styles.css,
+  public/           served as-is: styles.css, coins/, vendor/, samples/,
                     derive.html (GENERATED), tools/ (offline xpub tool download)
   frame/            SOURCE of the seed frame: derive.src.html, derive.js, sandbox-shim.js,
                     vendor/ (unmodified BIP39 engine, MIT, with SHA256SUMS)
   build_frame.py    builds public/derive.html from frame/
-  app/              SOURCE of the React pages (Vite + TypeScript): sign-up, xpub, checkout;
+  app/              SOURCE of the React pages (Vite + TypeScript): sign-up, xpub, wallet, checkout;
                     `npm run build` writes public/app/ (BUILT, committed)
 backend/
   app.py            API routes; serves ../frontend/public
@@ -48,7 +48,7 @@ backend/
 | Payments: `POST /payments`, `GET /payments[/{id}]`, 30-min window, address reuse for the gap limit | Built and tested |
 | Watcher: detection with standard confirmations, native coins + USDT; cron mode with a single-instance lock | Built; logic tested with a fake chain, providers checked live (read-only) |
 | Signed webhooks with retries | Built and tested |
-| Wallet vault: password-encrypted phrase on the device, unlock / auto-lock (`wallet.html`) | Built; E2E tested (Lock bug fixed) |
+| Wallet vault: password-encrypted phrase on the device, unlock / auto-lock (`/wallet.html`, `frontend/app/src/wallet/`) | Built; E2E tested (Lock bug fixed) |
 | Test environment: `run_tests.py`, E2E (Playwright), 94% backend coverage, CI | Built |
 | API key safety: settings need the wallet sign-in; key hint and last use | Built and tested (backend + E2E) |
 | Webhooks and Integration screens, tested code samples (Python, Node.js, PHP, curl) | Built and tested (backend + E2E) |

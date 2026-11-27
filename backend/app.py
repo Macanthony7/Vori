@@ -868,5 +868,10 @@ def xpub_page():
     return FileResponse(PUBLIC / "app" / "xpub.html")
 
 
+@app.get("/wallet.html", include_in_schema=False)
+def wallet_page():
+    return FileResponse(PUBLIC / "app" / "wallet.html")
+
+
 # Frontend (other pages, scripts, styles). Mounted last so API routes win.
 app.mount("/", StaticFiles(directory=PUBLIC, html=True), name="static")

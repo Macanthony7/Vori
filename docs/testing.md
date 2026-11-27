@@ -91,7 +91,7 @@ on; CI's Chromium records its own on each run (nothing to compare there until go
 process, so browser tests count) and **fails below 90%** (`COVERAGE_MIN`). The line-by-line report is
 in `htmlcov/index.html` after a run (CI keeps it as the `coverage-html` artifact).
 
-What isn't measured: the JavaScript and TypeScript (`wallet.js`, `frontend/app/`, the frame). The E2E tests cover
+What isn't measured: the JavaScript and TypeScript (`frontend/app/`, the frame). The E2E tests cover
 it by behavior instead. Add JavaScript coverage (Chromium's built-in coverage via Playwright) if a
 frontend bug ever gets through.
 

@@ -54,9 +54,9 @@ sequenceDiagram
 - The frame resizes itself via `postMessage({type: "height"})` and reports load failures via `{type: "frame-error"}`.
 - **Blocked-frame fallback:** the parent shows "Loading the secure phrase window…" until the frame's first message. If nothing arrives within 12 s, the browser blocked sandboxed scripts: the parent hides the frame and tells the user to switch browsers or use xpub keys. Known case: the Claude desktop app's preview browser, which never runs scripts in sandboxed iframes. Verified working in Chrome.
 
-### Wallet unlock (`wallet.html`)
+### Wallet unlock (`/wallet.html`)
 
-`wallet.js` reads the saved vault from `localStorage["wallet.vault.v1"]`, loads
+The wallet page (`frontend/app/src/wallet/Wallet.tsx`) reads the saved vault from `localStorage["wallet.vault.v1"]`, loads
 `derive.html#unlock`, answers the frame's `ready` with the vault, and the frame asks for the
 password. The unlocked keys stay in the frame (for signing Send, coming next). Lock = reload the
 frame. Details and risks: [security.md](security.md#wallet-vault).
@@ -69,11 +69,11 @@ auto-lock) ends the session and reloads the frame. See [api.md](api.md#wallet).
 
 Merchants who signed up with xpub keys have no vault: their keys are in their own wallet.
 
-### Send (`wallet.html`, BTC / LTC / DOGE)
+### Send (`/wallet.html`, BTC / LTC / DOGE)
 
 ```mermaid
 sequenceDiagram
-    participant P as wallet.js (online)
+    participant P as Wallet page (online)
     participant F as derive.html (offline, unlocked)
     participant S as Server
     P->>S: GET /wallet/send/BTC
@@ -232,9 +232,8 @@ the API and the watcher write at the same time.
 | `frontend/frame/sandbox-shim.js` | In-memory `localStorage` (sandboxed frames can't touch storage) + error reporting |
 | `frontend/frame/vendor/` | Unmodified BIP39 engine from Ian Coleman's tool, with `SHA256SUMS` |
 | `frontend/public/styles.css` | Design tokens and shared components: imported by the React pages and inlined into the frame |
-| `frontend/public/wallet.html`, `wallet.js`, `wallet.css` | Wallet page: unlock, sign-in, balances, Receive, recent payments, new API key, lock, remove from this device |
-| `frontend/app/` | React + TypeScript pages (Vite): `index.html`/`xpub.html` + `src/signup/` are sign-up (served at `/` and `/xpub.html`); `pay.html` + `src/pay/` is the checkout page for payers; `src/coins.tsx` is shared coin data and marks. Build with `npm run build` |
-| `frontend/public/app/` | **Built** React pages (committed, don't edit): served as is: `/`, `/xpub.html` and `/pay/{id}` return its pages |
+| `frontend/app/` | React + TypeScript pages (Vite): `index.html`/`xpub.html` + `src/signup/` are sign-up (served at `/` and `/xpub.html`); `wallet.html` + `src/wallet/` is the wallet (`/wallet.html`: `Wallet.tsx` vault, frame, sign-in, navigation and sending; `WalletTab`, `PaymentsTab`, `SettingsTab` the screens); `pay.html` + `src/pay/` is the checkout page for payers; `src/coins.tsx` is shared coin data and marks. Build with `npm run build` |
+| `frontend/public/app/` | **Built** React pages (committed, don't edit): served as is: `/`, `/xpub.html`, `/wallet.html` and `/pay/{id}` return its pages |
 | `frontend/public/vendor/wallet-core/` | Signing engine (Trust Wallet Core 4.8.7 + protobufjs minimal), unmodified, pinned by `SHA256SUMS`; see its `NOTICE.md` |
 | `frontend/public/vendor/kjua.js` | QR codes (MIT), extracted unchanged from the vendored BIP39 bundle |
 | `frontend/public/derive.html` | **Generated** seed frame (don't edit) |

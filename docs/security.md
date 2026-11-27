@@ -76,7 +76,7 @@ Paths 1 and 2 of onboarding need a recovery phrase in the browser. It's confined
 | `sandbox-shim.js` swaps `localStorage` for an in-memory object | Nothing in the frame can persist. The encrypted vault is stored by the parent page instead. |
 | Server header `frame-ancestors 'self'` | Only our own pages can embed our pages, so `postMessage(…, "*")` from the frame can only reach our parent page. |
 
-The parent (the sign-up page, `frontend/app/src/signup/index.tsx`, or `wallet.js`) only accepts messages whose `event.source` is the frame's window, and
+The parent (the sign-up page, `frontend/app/src/signup/index.tsx`, or the wallet, `frontend/app/src/wallet/Wallet.tsx`) only accepts messages whose `event.source` is the frame's window, and
 validates that every xpub value is a string before posting it.
 
 **What this doesn't protect against:** malware on the user's device, malicious browser extensions,
@@ -92,14 +92,14 @@ password or the vault.
 
 ```mermaid
 sequenceDiagram
-    participant P as Page (sign-up / wallet.js, online)
+    participant P as Page (sign-up / wallet, online)
     participant F as derive.html (sandboxed, offline)
     Note over F: Signup: phrase step, then password step
     F->>F: PBKDF2-SHA256(password, random salt, 600k) → AES-256-GCM key
     F->>F: encrypt {phrase, passphrase, account}
     F->>P: {type: "xpubs", xpubs, vault}
     P->>P: POST /accounts (xpubs only), then localStorage["wallet.vault.v1"] = vault
-    Note over P,F: Later: wallet.html
+    Note over P,F: Later: /wallet.html
     P->>F: load derive.html#unlock
     F->>P: {type: "ready"}
     P->>F: {type: "vault", vault}

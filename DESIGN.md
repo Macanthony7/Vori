@@ -334,7 +334,7 @@ Small struck cartouches that carry coin, network, status and sign-up step.
 - 52px `action` circles with a 22px stroke icon, label under in label size at weight 600. Hover lifts 1px; keyboard focus rings the circle.
 
 ### Coin marks
-- The coin's logo at 40px (64px on the coin screen), from `frontend/public/coins/`: colour SVGs from the *cryptocurrency-icons* set v0.18.1 (CC0-1.0, no attribution needed). Tokens get the chain's logo as an 18px badge at the lower right; test networks get a grey "t" badge. A coin without a logo falls back to a disc in its colour with its sign (₿, Ξ, Ł, Ð, B, T, ₮). To add a coin, put `<asset>.svg` (lower case) in `coins/` and add it to `COIN_LOGO` in `wallet.js` and `frontend/app/src/coins.tsx`.
+- The coin's logo at 40px (64px on the coin screen), from `frontend/public/coins/`: colour SVGs from the *cryptocurrency-icons* set v0.18.1 (CC0-1.0, no attribution needed). Tokens get the chain's logo as an 18px badge at the lower right; test networks get a grey "t" badge. A coin without a logo falls back to a disc in its colour with its sign (₿, Ξ, Ł, Ð, B, T, ₮). To add a coin, put `<asset>.svg` (lower case) in `coins/` and add it to `COIN_LOGO` in `frontend/app/src/coins.tsx`.
 
 ### Chips and segmented controls
 - **Chips** (status filters): pill buttons on `surface`; the pressed one is `action`. They scroll sideways on narrow screens.
@@ -360,7 +360,7 @@ Small struck cartouches that carry coin, network, status and sign-up step.
 - **Do** use mono for addresses, keys, phrases, secrets and code, and nowhere else.
 - **Do** keep QR codes and shop logos on a white field with a hairline border in both schemes.
 - **Do** keep element ids stable. The E2E suite (`tests/e2e/`) selects by id and visible text, and the screenshot goldens in `tests/e2e/goldens/` must be refreshed when a visual change is intended.
-- **Do** rebuild the seed frame with `frontend/build_frame.py` after any change to `styles.css`. It is inlined into the sandboxed frame and pinned by SHA-256. Page-only styles go in `wallet.css` or `frontend/app/src/pay/pay.css`; `styles.css` changes also need `npm run build` in `frontend/app/`.
+- **Do** rebuild the seed frame with `frontend/build_frame.py` after any change to `styles.css`. It is inlined into the sandboxed frame and pinned by SHA-256. Page-only styles go in `frontend/app/src/wallet/wallet.css` or `frontend/app/src/pay/pay.css`; `styles.css` changes also need `npm run build` in `frontend/app/`.
 
 ### Don't:
 - **Don't** use gold for pending, in-flight or warning states. It means proven or "you are here".

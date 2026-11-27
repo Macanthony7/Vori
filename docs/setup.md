@@ -131,8 +131,8 @@ Create and import were verified in Chrome. The Claude desktop app's preview brow
 
 ## Building the React pages
 
-The checkout page is React + TypeScript in `frontend/app/` (more pages move there next, see
-[plan.md](plan.md#8-react-rebuild)). The build in `frontend/public/app/` is committed, so the server
+Every page (sign-up, xpub, wallet, checkout) is React + TypeScript in `frontend/app/`
+([plan.md](plan.md#8-react-rebuild)); only the phrase frame is plain JS. The build in `frontend/public/app/` is committed, so the server
 needs no Node. After changing anything in `frontend/app/` (or `frontend/public/styles.css`), run:
 
 ```powershell

@@ -11,6 +11,6 @@ export default defineConfig({
     outDir: "../public/app",
     emptyOutDir: true,
     modulePreload: { polyfill: false },
-    rollupOptions: { input: { pay: "pay.html", index: "index.html", xpub: "xpub.html" } },
+    rollupOptions: { input: { pay: "pay.html", index: "index.html", xpub: "xpub.html", wallet: "wallet.html" } },
   },
 });

@@ -2,6 +2,7 @@
 // POST /pay/{id}/choose. Docs: docs/api.md#checkout-page
 import { useEffect, useRef, useState } from "react";
 import { CoinIcon, money, networkName } from "../coins";
+import { Qr } from "../qr";
 
 type Option = { chain: string; asset: string; amount: string; available: boolean };
 type Payment = {
@@ -190,7 +191,7 @@ function PaymentBox({ p, secondsLeft, offline }: { p: Payment; secondsLeft: numb
       </p>
 
       <div id="pay-box" hidden={!sending}>
-        {sending && <Qr text={URI_SCHEME[p.chain!] ? `${URI_SCHEME[p.chain!]}:${p.address}?amount=${p.amount_due}` : p.address} />}
+        {sending && <Qr id="qr" size={240} text={URI_SCHEME[p.chain!] ? `${URI_SCHEME[p.chain!]}:${p.address}?amount=${p.amount_due}` : p.address} />}
         <ul className="list pay-fields">
           <li>
             <label htmlFor="address">Address</label>
@@ -243,14 +244,6 @@ function Progress({ status }: { status: Payment["status"] }) {
       })}
     </ol>
   );
-}
-
-function Qr({ text }: { text: string }) {
-  const box = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    box.current!.replaceChildren(kjua({ text, render: "canvas", size: 240, ecLevel: "M", fill: "#000", back: "#fff" }));
-  }, [text]);
-  return <div id="qr" className="qr" aria-hidden="true" ref={box} />;
 }
 
 function CopyButton({ target, value }: { target: string; value: string }) {

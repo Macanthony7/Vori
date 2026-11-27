@@ -327,7 +327,7 @@ even when the payer's clock is wrong), `shop_name` and `logo_url` (`/pay/{id}/lo
 
 ## Wallet
 
-Used by the wallet page (`wallet.html`). Sign-in needs no API key: the wallet proves it owns the
+Used by the wallet page (`/wallet.html`). Sign-in needs no API key: the wallet proves it owns the
 account by signing with the private key of the BTC main address (`m/44'/0'/account'/0/0`), which the
 server checks against the stored BTC xpub. Accounts created with xpub keys only (no phrase in our
 wallet) keep using their API key.
